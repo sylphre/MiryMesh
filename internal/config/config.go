@@ -23,6 +23,7 @@ type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	DB       DBConfig       `yaml:"db"`
 	Datanode DatanodeConfig `yaml:"datanode"`
+	Auth     AuthConfig     `yaml:"auth"`
 	Log      LogConfig      `yaml:"log"`
 }
 
@@ -46,6 +47,19 @@ type DatanodeConfig struct {
 	Paths         []string `yaml:"paths"`
 }
 
+// AuthConfig holds S3 credential settings for standalone / single-node mode.
+// In M1 the controller stores credentials in config file. Future milestones
+// will persist them in the metadata DB.
+type AuthConfig struct {
+	Credentials []Credential `yaml:"credentials"`
+}
+
+// Credential is a single S3 access key / secret pair.
+type Credential struct {
+	AccessKey string `yaml:"access_key"`
+	SecretKey string `yaml:"secret_key"`
+}
+
 // LogConfig holds logging settings.
 type LogConfig struct {
 	Level string `yaml:"level"`
@@ -53,6 +67,8 @@ type LogConfig struct {
 
 var (
 	regionRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+	// Access keys are 3-128 printable characters without whitespace or colon.
+	accessKeyRe = regexp.MustCompile(`^[^\s:]{3,128}$`)
 
 	validLogLevels = map[string]bool{
 		"debug": true,
@@ -129,6 +145,9 @@ func (c *Config) Validate() error {
 	if err := c.Datanode.validate(); err != nil {
 		return fmt.Errorf("datanode: %w", err)
 	}
+	if err := c.Auth.validate(); err != nil {
+		return fmt.Errorf("auth: %w", err)
+	}
 	if err := c.Log.validate(); err != nil {
 		return fmt.Errorf("log: %w", err)
 	}
@@ -187,6 +206,29 @@ func (d DatanodeConfig) validate() error {
 		if !strings.HasPrefix(d.ControllerURL, "http://") && !strings.HasPrefix(d.ControllerURL, "https://") {
 			return fmt.Errorf("controller_url %q must start with http:// or https://", d.ControllerURL)
 		}
+	}
+	return nil
+}
+
+func (a AuthConfig) validate() error {
+	seen := make(map[string]bool, len(a.Credentials))
+	for i, c := range a.Credentials {
+		if strings.TrimSpace(c.AccessKey) == "" {
+			return fmt.Errorf("credentials[%d].access_key must not be empty", i)
+		}
+		if !accessKeyRe.MatchString(c.AccessKey) {
+			return fmt.Errorf("credentials[%d].access_key %q is invalid (3-128 chars, no whitespace/colon)", i, c.AccessKey)
+		}
+		if strings.TrimSpace(c.SecretKey) == "" {
+			return fmt.Errorf("credentials[%d].secret_key must not be empty", i)
+		}
+		if len(c.SecretKey) < 8 {
+			return fmt.Errorf("credentials[%d].secret_key is too short (min 8)", i)
+		}
+		if seen[c.AccessKey] {
+			return fmt.Errorf("credentials[%d].access_key %q is duplicated", i, c.AccessKey)
+		}
+		seen[c.AccessKey] = true
 	}
 	return nil
 }
