@@ -49,6 +49,7 @@ type DatanodeConfig struct {
 }
 
 // StorageConfig holds replication / placement settings for controller.
+// DefaultPolicy empty means "single" (M3+ default).
 type StorageConfig struct {
 	DefaultPolicy string            `yaml:"default_policy"`
 	BucketPolicy  map[string]string `yaml:"bucket_policy"`

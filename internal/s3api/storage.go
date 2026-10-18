@@ -4,7 +4,6 @@
 package s3api
 
 import (
-	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
@@ -243,7 +242,6 @@ func (s *Storage) PutObject(bucket, key string, contentType string, meta map[str
 	}
 	s.meta[bucket][key] = m
 	s.mu.Unlock()
-	_ = bytes.Compare(nil, nil) // keep bytes import used in other contexts; no-op
 	return m, nil
 }
 
@@ -317,6 +315,9 @@ func (s *Storage) HeadObject(bucket, key string) (ObjectMeta, error) {
 }
 
 // DeleteObject removes the blob idempotently.
+// Invariant (docs/07, replication): callers must not delete existing replicas
+// until replacement replicas are verified. This method is a single-node primitive;
+// higher layers (replication.Engine) enforce the invariant before calling it.
 func (s *Storage) DeleteObject(bucket, key string) error {
 	if err := s.ensureBucketExists(bucket); err != nil {
 		return err
