@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+
+# ── Go ──────────────────────────────────────────────────────────
+# Binaries
+/mirymesh
+/mirymesh-controller
+/mirymesh-storage
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build / test cache
+/vendor/
+go.work.sum
+
+# Test binaries & coverage
+*.test
+*.out
+coverage.html
+coverage.txt
+*.cover
+*.prof
+c.out
+
+# ── Design working data (private drafts) ───────────────────────
+# 作業用ドラフトはGit管理外。確定したドキュメントのみ docs/ に昇格させる。
+/design-data/
+/.design/
+private-design/
+*.design-draft.md
+*.private.md
+
+# ── Design base (local reference, not committed) ─────────────────
+/design-base/
+
+# ── Docs (local, not committed) ──────────────────────────────────
+/docs/
+
+# ── Env & Secrets ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+
+# ── IDE / OS ───────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Logs & Temp ────────────────────────────────────────────────
+*.log
+tmp/
+temp/
+
+# ── Frontend (future) ──────────────────────────────────────────
+node_modules/
+.next/
+dist-frontend/
+
+# ── Packaging ──────────────────────────────────────────────────
+*.deb
+*.rpm
+*.tar.gz
+
+# ── Charter (local, not committed) ─────────────────────────────
+/AGENTS.md
