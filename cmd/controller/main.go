@@ -13,6 +13,7 @@ import (
 
 	"github.com/sylphre/MiryMesh/internal/auth"
 	"github.com/sylphre/MiryMesh/internal/config"
+	"github.com/sylphre/MiryMesh/internal/datanode"
 	"github.com/sylphre/MiryMesh/internal/s3api"
 )
 
@@ -46,12 +47,36 @@ func main() {
 	for _, c := range cfg.Auth.Credentials {
 		_ = authStore.Add(c.AccessKey, c.SecretKey)
 	}
-	router := s3api.NewRouter(store, cfg.Server.Region)
-	handler := s3api.AuthMiddleware(authStore, router)
+	s3Router := s3api.NewRouter(store, cfg.Server.Region)
+
+	// Internal datanode registry (M2).
+	reg := datanode.NewRegistry(30*time.Second, 90*time.Second)
+	internalToken := ""
+	if len(cfg.Auth.Credentials) > 0 {
+		internalToken = cfg.Auth.Credentials[0].SecretKey
+	}
+	dnHandler := datanode.NewHandler(reg, internalToken)
+	internalMux := http.NewServeMux()
+	dnHandler.RegisterRoutes(internalMux)
+
+	mux := http.NewServeMux()
+	mux.Handle("/internal/", internalMux)
+	mux.Handle("/", s3api.AuthMiddleware(authStore, s3Router))
+
+	go func() {
+		ticker := time.NewTicker(reg.HeartbeatInterval())
+		defer ticker.Stop()
+		for range ticker.C {
+			offline := reg.MarkOfflineIfStale(time.Now())
+			for _, id := range offline {
+				slog.Info("node marked offline", "node_id", id)
+			}
+		}
+	}()
 
 	srv := &http.Server{
 		Addr:         cfg.Server.Listen,
-		Handler:      handler,
+		Handler:      mux,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  120 * time.Second,

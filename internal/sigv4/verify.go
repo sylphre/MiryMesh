@@ -18,6 +18,42 @@ import (
 	"time"
 )
 
+// isUnreserved reports whether b is an RFC3986 unreserved character: A-Z a-z 0-9 - . _ ~
+func isUnreserved(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '-' || b == '.' || b == '_' || b == '~'
+}
+
+// encodeRFC3986 percent-encodes s per RFC3986 (unreserved chars are left as-is,
+// space becomes %20, hex digits are upper-case). It operates on UTF-8 bytes
+// so non-ASCII bytes are percent-encoded per byte.
+func encodeRFC3986(s string) string {
+	// Fast path: check if encoding is needed.
+	needs := false
+	for i := 0; i < len(s); i++ {
+		if !isUnreserved(s[i]) {
+			needs = true
+			break
+		}
+	}
+	if !needs {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) * 3)
+	const hexDigits = "0123456789ABCDEF"
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if isUnreserved(c) {
+			b.WriteByte(c)
+		} else {
+			b.WriteByte('%')
+			b.WriteByte(hexDigits[c>>4])
+			b.WriteByte(hexDigits[c&0x0F])
+		}
+	}
+	return b.String()
+}
+
 const (
 	iso8601Layout = "20060102T150405Z"
 	dateLayout    = "20060102"
@@ -318,17 +354,20 @@ func canonicalURI(p string) string {
 	if p == "" {
 		return "/"
 	}
-	// Encode each segment but keep "/".
+	// AWS: normalize by re-decoding any already-encoded segments then RFC3986 re-encoding,
+	// keeping "/" as delimiter and preserving "~" etc.
+	// The incoming r.URL.Path is already decoded per net/http semantics for unreserved
+	// characters, but may contain encoded bytes for special characters. To handle both
+	// SDK variants consistently, split on "/", decode each segment with PathUnescape
+	// (best-effort), then encodeRFC3986 per segment.
 	segments := strings.Split(p, "/")
 	for i, seg := range segments {
-		segments[i] = url.PathEscape(seg)
-		// PathEscape escapes some unreserved chars; normalize.
-		segments[i] = strings.ReplaceAll(segments[i], "%2F", "%2F")
+		if decoded, err := url.PathUnescape(seg); err == nil {
+			seg = decoded
+		}
+		segments[i] = encodeRFC3986(seg)
 	}
 	joined := strings.Join(segments, "/")
-	// url.PathEscape encodes "~" etc; AWS keeps unreserved chars unescaped — but for compat, keep escaped form consistently.
-	// Both client and server use same encoding, so exact bytes must match AWS test suite.
-	// For simplicity, return joined; test vectors are generated with same logic.
 	if !strings.HasPrefix(joined, "/") {
 		joined = "/" + joined
 	}
@@ -360,7 +399,7 @@ func canonicalQueryString(values url.Values, presigned bool) string {
 		vs := filtered[k]
 		sort.Strings(vs)
 		for _, v := range vs {
-			parts = append(parts, url.QueryEscape(k)+"="+url.QueryEscape(v))
+			parts = append(parts, encodeRFC3986(k)+"="+encodeRFC3986(v))
 		}
 	}
 	return strings.Join(parts, "&")

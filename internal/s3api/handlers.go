@@ -204,8 +204,11 @@ func (rt *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		writeError(w, r, errNoSuchBucket)
 		return
 	}
-	// Quota / 95% check placeholder: M1 uses filesystem free; if we want to simulate 507 we could check disk usage.
-	// For now, rely on OS error (no space) mapping to 507.
+	// Quota enforcement: if ContentLength is known, check 95% watermark before accepting body.
+	if r.ContentLength > 0 && rt.store.IsOverQuota(r.ContentLength) {
+		writeError(w, r, errInsufficient)
+		return
+	}
 	ct := r.Header.Get("Content-Type")
 	// Collect x-amz-meta-*
 	meta := make(map[string]string)

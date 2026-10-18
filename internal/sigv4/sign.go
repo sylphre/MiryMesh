@@ -12,6 +12,40 @@ import (
 	"strings"
 )
 
+// encodeRFC3986 is the signer-side alias — actual implementation lives in verify.go
+// but sign.go needs the same encoder to produce matching canonical strings.
+// We duplicate the logic here to avoid import cycles; keep them in sync.
+func signerEncodeRFC3986(s string) string {
+	// Use the same isUnreserved / encoding as verify.go
+	isUnreservedLocal := func(b byte) bool {
+		return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '-' || b == '.' || b == '_' || b == '~'
+	}
+	needs := false
+	for i := 0; i < len(s); i++ {
+		if !isUnreservedLocal(s[i]) {
+			needs = true
+			break
+		}
+	}
+	if !needs {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) * 3)
+	const hexDigits = "0123456789ABCDEF"
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if isUnreservedLocal(c) {
+			b.WriteByte(c)
+		} else {
+			b.WriteByte('%')
+			b.WriteByte(hexDigits[c>>4])
+			b.WriteByte(hexDigits[c&0x0F])
+		}
+	}
+	return b.String()
+}
+
 // Signer signs a request with SigV4, used in tests to generate valid
 // Authorization headers without importing AWS SDK.
 type Signer struct {
@@ -92,7 +126,7 @@ func encodeQuerySorted(q url.Values) string {
 	var parts []string
 	for _, k := range keys {
 		for _, v := range q[k] {
-			parts = append(parts, url.QueryEscape(k)+"="+url.QueryEscape(v))
+			parts = append(parts, signerEncodeRFC3986(k)+"="+signerEncodeRFC3986(v))
 		}
 	}
 	return strings.Join(parts, "&")

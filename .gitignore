@@ -75,5 +75,8 @@ dist-frontend/
 *.rpm
 *.tar.gz
 
+# ── Review (local, not committed) ────────────────────────────
+/review/
+
 # ── Charter (local, not committed) ─────────────────────────────
 /AGENTS.md

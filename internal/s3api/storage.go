@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -28,7 +29,10 @@ type ObjectMeta struct {
 }
 
 // Storage is the local filesystem backend for M1 (single-node).
-// Later milestones replace placement with multi-node.
+// Later milestones replace placement with multi-node (see internal/metadata).
+// TODO(M2): replace in-memory meta map with DB-backed metadata (PostgreSQL
+// primary / MySQL both support). Currently meta is reconstructed from
+// filesystem on GetObject/HeadObject after restart — M1-review #3.
 type Storage struct {
 	mu      sync.RWMutex
 	root    string
@@ -67,6 +71,45 @@ func NewStorage(root string) (*Storage, error) {
 // Root returns the absolute storage root.
 func (s *Storage) Root() string { return s.root }
 
+// FilesystemCapacity returns total bytes of the filesystem containing root, or 0 on error.
+func (s *Storage) FilesystemCapacity() int64 {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(s.root, &st); err != nil {
+		return 0
+	}
+	return int64(st.Blocks * uint64(st.Bsize))
+}
+
+// FilesystemAvail returns free bytes (Bavail) of the filesystem, or 0 on error.
+func (s *Storage) FilesystemAvail() int64 {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(s.root, &st); err != nil {
+		return 0
+	}
+	return int64(st.Bavail * uint64(st.Bsize))
+}
+
+// FilesystemUsed returns used bytes (Blocks-Bfree), or 0 on error.
+func (s *Storage) FilesystemUsed() int64 {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(s.root, &st); err != nil {
+		return 0
+	}
+	return int64((st.Blocks - st.Bfree) * uint64(st.Bsize))
+}
+
+// IsOverQuota reports whether writing additional bytes would exceed the 95% watermark
+// of the underlying filesystem. Returns false if filesystem stats are unavailable.
+func (s *Storage) IsOverQuota(additional int64) bool {
+	capacity := s.FilesystemCapacity()
+	if capacity == 0 {
+		return false
+	}
+	used := s.FilesystemUsed()
+	limit := capacity * 95 / 100
+	return used+additional > limit
+}
+
 func (s *Storage) bucketDir(bucket string) string { return filepath.Join(s.root, bucket) }
 func (s *Storage) objectPath(bucket, key string) string {
 	// key may contain "/"; treat as relative path. Clean and prevent traversal.
@@ -75,6 +118,10 @@ func (s *Storage) objectPath(bucket, key string) string {
 	if clean == "." {
 		clean = ""
 	}
+	// TODO(M2+): reject traversal with 400 InvalidRequest instead of silent
+	// rewrite. Current __dotdot__ replacement is M1 compatibility shim; see
+	// validate.go — keys containing ".." segments should be rejected with
+	// errInvalidRequest rather than mangled. Tracked from M1-review #4.
 	if strings.HasPrefix(clean, ".."+string(os.PathSeparator)) || clean == ".." {
 		clean = strings.ReplaceAll(clean, "..", "__dotdot__")
 	}
@@ -163,7 +210,8 @@ func (s *Storage) PutObject(bucket, key string, contentType string, meta map[str
 	if strings.TrimSpace(key) == "" {
 		return ObjectMeta{}, errInvalidRequest
 	}
-	// Read fully to compute md5 and size; M1 is single-node local storage.
+	// TODO(M2+): stream via io.TeeReader + hash.Hash to avoid holding up to
+	// 5GiB in memory. Current io.ReadAll is M1 simplification — see M1-review #2.
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return ObjectMeta{}, err
