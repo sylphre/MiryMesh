@@ -14,6 +14,7 @@ import (
 	"github.com/sylphre/MiryMesh/internal/auth"
 	"github.com/sylphre/MiryMesh/internal/config"
 	"github.com/sylphre/MiryMesh/internal/datanode"
+	"github.com/sylphre/MiryMesh/internal/placement"
 	"github.com/sylphre/MiryMesh/internal/s3api"
 )
 
@@ -47,14 +48,19 @@ func main() {
 	for _, c := range cfg.Auth.Credentials {
 		_ = authStore.Add(c.AccessKey, c.SecretKey)
 	}
-	s3Router := s3api.NewRouter(store, cfg.Server.Region)
-
-	// Internal datanode registry (M2).
+	// Internal datanode registry (M2) and placement resolver (M3).
 	reg := datanode.NewRegistry(30*time.Second, 90*time.Second)
 	internalToken := ""
 	if len(cfg.Auth.Credentials) > 0 {
 		internalToken = cfg.Auth.Credentials[0].SecretKey
 	}
+	resolver, err := placement.NewResolver(reg, placement.New(0), cfg.Storage.DefaultPolicy, cfg.Storage.BucketPolicy)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "controller: invalid storage policy: %v\n", err)
+		os.Exit(1)
+	}
+	// TODO: GUI will manage bucket_policy at runtime; resolver.SetBucketPolicy is the wire point.
+	s3Router := s3api.NewRouterWithPlacement(store, cfg.Server.Region, resolver)
 	dnHandler := datanode.NewHandler(reg, internalToken)
 	internalMux := http.NewServeMux()
 	dnHandler.RegisterRoutes(internalMux)

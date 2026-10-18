@@ -14,7 +14,7 @@ import (
 type Handler struct {
 	registry *Registry
 	// token is the shared registration token for M2 (single static token).
-	// Later milestones will use one-time tokens issued via GUI.
+	// TODO: replace with GUI-issued one-time tokens (M4+). See M2-review #2.
 	token string
 }
 

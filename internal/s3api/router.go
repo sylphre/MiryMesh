@@ -6,13 +6,24 @@ package s3api
 import (
 	"net/http"
 	"strings"
+
+	"github.com/sylphre/MiryMesh/internal/datanode"
+	"github.com/sylphre/MiryMesh/internal/placement"
 )
 
 // Router routes S3-compatible requests. In M1 it handles path-style only
 // (virtual-hosted style is shimmable but not required for Nextcloud/Misskey).
 type Router struct {
-	store  *Storage
-	region string
+	store   *Storage
+	region  string
+	placing PlacementResolver
+}
+
+// PlacementResolver is the placement decision hook used by S3 handlers.
+// In M3 it is bound to the controller's datanode.Registry.
+type PlacementResolver interface {
+	// Resolve selects targets for a new object write. Size is object bytes if known, else 0.
+	Resolve(bucket string, size int64) ([]placement.Target, error)
 }
 
 // NewRouter creates a Router.
@@ -22,6 +33,21 @@ func NewRouter(store *Storage, region string) *Router {
 	}
 	return &Router{store: store, region: region}
 }
+
+// NewRouterWithPlacement creates a Router with placement resolver.
+func NewRouterWithPlacement(store *Storage, region string, resolver PlacementResolver) *Router {
+	if region == "" {
+		region = "us-east-1"
+	}
+	return &Router{store: store, region: region, placing: resolver}
+}
+
+// SetPlacement sets/overrides the placement resolver (useful in tests).
+func (rt *Router) SetPlacement(p PlacementResolver) { rt.placing = p }
+
+// Ensure imports are used even when placing is nil.
+var _ = datanode.StatusOnline
+var _ = placement.PolicySingle
 
 // ServeHTTP dispatches to handlers based on method + path + query.
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {

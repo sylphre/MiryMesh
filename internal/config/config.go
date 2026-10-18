@@ -24,6 +24,7 @@ type Config struct {
 	DB       DBConfig       `yaml:"db"`
 	Datanode DatanodeConfig `yaml:"datanode"`
 	Auth     AuthConfig     `yaml:"auth"`
+	Storage  StorageConfig  `yaml:"storage"`
 	Log      LogConfig      `yaml:"log"`
 }
 
@@ -45,6 +46,12 @@ type DBConfig struct {
 type DatanodeConfig struct {
 	ControllerURL string   `yaml:"controller_url"`
 	Paths         []string `yaml:"paths"`
+}
+
+// StorageConfig holds replication / placement settings for controller.
+type StorageConfig struct {
+	DefaultPolicy string            `yaml:"default_policy"`
+	BucketPolicy  map[string]string `yaml:"bucket_policy"`
 }
 
 // AuthConfig holds S3 credential settings for standalone / single-node mode.
@@ -148,6 +155,9 @@ func (c *Config) Validate() error {
 	if err := c.Auth.validate(); err != nil {
 		return fmt.Errorf("auth: %w", err)
 	}
+	if err := c.Storage.validate(); err != nil {
+		return fmt.Errorf("storage: %w", err)
+	}
 	if err := c.Log.validate(); err != nil {
 		return fmt.Errorf("log: %w", err)
 	}
@@ -231,6 +241,35 @@ func (a AuthConfig) validate() error {
 		seen[c.AccessKey] = true
 	}
 	return nil
+}
+
+func (s StorageConfig) validate() error {
+	if s.DefaultPolicy != "" {
+		if _, err := parsePlacementPolicy(s.DefaultPolicy); err != nil {
+			return fmt.Errorf("default_policy: %w", err)
+		}
+	}
+	for bucket, pol := range s.BucketPolicy {
+		if strings.TrimSpace(bucket) == "" {
+			return fmt.Errorf("bucket_policy: bucket name must not be empty")
+		}
+		if _, err := parsePlacementPolicy(pol); err != nil {
+			return fmt.Errorf("bucket_policy[%q]: %w", bucket, err)
+		}
+	}
+	return nil
+}
+
+// parsePlacementPolicy validates a single policy string.
+// Canonical forms: single, dual, triple, ALL (case-insensitive).
+func parsePlacementPolicy(s string) (string, error) {
+	norm := strings.TrimSpace(strings.ToLower(s))
+	switch norm {
+	case "single", "dual", "triple", "all":
+		return norm, nil
+	default:
+		return "", fmt.Errorf("policy %q must be one of single/dual/triple/ALL", s)
+	}
 }
 
 func (l LogConfig) validate() error {

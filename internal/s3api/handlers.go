@@ -204,10 +204,24 @@ func (rt *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		writeError(w, r, errNoSuchBucket)
 		return
 	}
-	// Quota enforcement: if ContentLength is known, check 95% watermark before accepting body.
-	if r.ContentLength > 0 && rt.store.IsOverQuota(r.ContentLength) {
-		writeError(w, r, errInsufficient)
-		return
+	// Placement validation (M3): if a resolver is configured, check policy feasibility
+	// before touching local storage. For now all writes still go to local store
+	// (single-node), but dual/triple/ALL require enough nodes/disks — insufficient
+	// maps to 507 InsufficientStorage.
+	if rt.placing != nil {
+		targets, pErr := rt.placing.Resolve(bucket, r.ContentLength)
+		if pErr != nil {
+			// TODO: GUI should surface this as a warning banner. For now S3 returns 507.
+			writeError(w, r, APIError{Code: errInsufficient.Code, Message: pErr.Error(), Status: 507})
+			return
+		}
+		_ = targets // In M3 we still write locally; M4 will replicate to targets.
+	} else {
+		// Legacy single-node quota check (kept for dev mode with no registry).
+		if r.ContentLength > 0 && rt.store.IsOverQuota(r.ContentLength) {
+			writeError(w, r, errInsufficient)
+			return
+		}
 	}
 	ct := r.Header.Get("Content-Type")
 	// Collect x-amz-meta-*
