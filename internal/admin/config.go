@@ -73,21 +73,12 @@ func (h *Handler) handleConfigPolicy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	// Persist to setupStore
-	st := h.setupStore.Get()
-	if st == nil {
-		st = &SetupState{Initialized: true}
+	if err := h.setupStore.UpdatePolicy(pol.String()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	st.DefaultPolicy = pol.String()
-	// Save via SetupStore.Save would fail if already initialized (guard) — update directly
-	h.setupStore.mu.Lock()
-	h.setupStore.state = st
-	h.setupStore.mu.Unlock()
-	if saveErr := h.setupStore.Save(st); saveErr != nil && saveErr != errAlreadyInitialized {
-		h.setupStore.mu.Lock()
-		data, _ := json.MarshalIndent(st, "", "  ")
-		h.setupStore.mu.Unlock()
-		_ = data
+	if h.resolver != nil {
+		_ = h.resolver.SetDefaultPolicy(pol)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"default_policy": pol.String()})

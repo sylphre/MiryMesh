@@ -3,6 +3,7 @@
 # MiryMesh config example — /etc/mirymesh/config.yaml
 server:
   listen: ":9000"
+  admin_listen: ":9001" # Admin GUI/API: keep on Tailscale or localhost, do NOT expose to 0.0.0.0 if possible
   region: "us-east-1"
   data_dir: "/var/lib/mirymesh"
 auth:

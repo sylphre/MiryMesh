@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
 [Unit]
-Description=MiryMesh Controller (S3 API)
+Description=MiryMesh Controller (S3 API on :9000, admin on :9001 — Tailscale/localhost only)
 After=network.target
 
 [Service]

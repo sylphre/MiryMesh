@@ -101,7 +101,7 @@ func TestLogValidate(t *testing.T) {
 func TestLoadValidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	content := "server:\n  listen: \":9001\"\n  region: \"ap-northeast-1\"\ndb:\n  driver: \"postgres\"\n  dsn: \"postgres://localhost/mirymesh?sslmode=disable\"\nlog:\n  level: \"debug\"\n"
+	content := "server:\n  listen: \":9001\"\n  admin_listen: \":9002\"\n  region: \"ap-northeast-1\"\ndb:\n  driver: \"postgres\"\n  dsn: \"postgres://localhost/mirymesh?sslmode=disable\"\nlog:\n  level: \"debug\"\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write temp config: %v", err)
 	}

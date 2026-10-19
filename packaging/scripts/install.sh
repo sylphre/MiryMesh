@@ -195,14 +195,15 @@ fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload 2>/dev/null || true
   if [ "$ROLE" = "master" ]; then
-    log "To start Master: sudo systemctl enable --now mirymesh-controller && xdg-open http://127.0.0.1:9000/  (setup wizard at /static/setup.html)"
-    log "Setup:    Master 初回はブラウザで http://master:9000/ → /static/setup.html で AccessKey/Secret/Policy を入力 (Admin Token は localStorage に保存)"
+    log "To start Master: sudo systemctl enable --now mirymesh-controller && xdg-open http://127.0.0.1:9001/  (setup wizard at /static/setup.html)"
+    log "Setup:    Master 初回はブラウザで http://master:9001/ → /static/setup.html で AccessKey/Secret/Policy を入力 (Admin Token は localStorage に保存)"
     log "Status:   systemctl status mirymesh-controller; journalctl -u mirymesh-controller -f"
-    log "Health:   curl -f http://127.0.0.1:9000/healthz"
+    log "Health:   curl -f http://127.0.0.1:9000/healthz                          # S3 (9000)"
+    log "Admin:    curl -H \"X-Admin-Token: \$TOKEN\" http://127.0.0.1:9001/api/admin/health  # Admin (9001, Tailscale/127.0.0.1 only)"
   else
     log "To start Client: sudo systemctl enable --now mirymesh-datanode"
     log "Status:   systemctl status mirymesh-datanode; journalctl -u mirymesh-datanode -f"
-    log "Check Master: curl http://127.0.0.1:9000/api/admin/nodes  # from Master host"
+    log "Check Master: curl -H \"X-Admin-Token: \$TOKEN\" http://127.0.0.1:9001/api/admin/nodes  # from Master host (admin 9001)"
   fi
 else
   if [ "$ROLE" = "master" ]; then

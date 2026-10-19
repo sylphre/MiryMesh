@@ -62,7 +62,8 @@
       const disks = j.disks || [];
       if (!disks.length) pathsEl.textContent = "No disks";
       else {
-        const rows = disks.map(d => `${d.NodeID}:${d.Path} (${d.Capacity} cap, ${d.Used} used)`);
+        const esc = MiryMeshAPI.escapeHTML || function(s){ const d=document.createElement("div"); d.textContent=s; return d.innerHTML; };
+        const rows = disks.map(d => esc(String(d.NodeID)) + ":" + esc(String(d.Path)) + " (" + esc(String(d.Capacity)) + " cap, " + esc(String(d.Used)) + " used)");
         pathsEl.innerHTML = rows.map(r => "<div>" + r + "</div>").join("");
       }
       document.getElementById("paths-status").style.display = "none";

@@ -61,14 +61,21 @@ sudo bash packaging/scripts/install.sh --help          # ヘルプ
 
 # Master はそのまま起動、ブラウザでセットアップを完了
 sudo systemctl enable --now mirymesh-controller
-# ブラウザで http://master:9000/ を開く → 初回のみ /static/setup.html へリダイレクト
-# AccessKey / Secret / Policy を入力 → Admin Token は localStorage に保存
-# 以降は /static/settings.html で default_policy / DataNode paths を確認・変更
+# ブラウザで http://master:9001/ を開く → 初回のみ /static/setup.html へリダイレクト（Admin は 9001）
+# AccessKey / Secret / Policy を入力 → Admin Token は localStorage に保存（:9001 は 127.0.0.1 / Tailscale のみに閉じること）
+# 以降は http://master:9001/static/settings.html で default_policy / DataNode paths を確認・変更
 ```
 
 スクリプトは `preinstall.sh`/`postinstall.sh` と同様に `mirymesh:mirymesh` ユーザを作成し、`/var/lib/mirymesh` を用意します。
 Client は `install.sh --client --master-url http://master:9000` で `datanode.controller_url` が既に注入されるため、セットアップ画面は出ません。不足があれば Web の Settings で `datanode.paths` を確認してください。
-Master では `mirymesh-controller` が S3 API を提供し、Client では `mirymesh-datanode` が Master に登録して容量を提供します。Client の `datanode.paths`（例: `["/mnt/disk1"]`）と `datanode.controller_url` はスクリプトが `--master-url` から自動設定します。
+Master では `mirymesh-controller` が 2 ポートで起動します（S3 は `:9000`、Admin GUI/API は `:9001`）。`:9001` は `admin_listen`（例: `127.0.0.1:9001` や Tailscale IP）で閉じること（`SECURITY.md`）。Client では `mirymesh-datanode` が Master に登録して容量を提供します。Client の `datanode.paths`（例: `["/mnt/disk1"]`）と `datanode.controller_url` はスクリプトが `--master-url` から自動設定します。
+
+| Port | 用途 | 例 |
+|---|---|---|
+| `:9000` | S3 API（`PUT/GET` 等、SigV4） | `curl -f http://127.0.0.1:9000/healthz` |
+| `:9001` | Admin GUI/API（`setup`/`settings`/`/api/admin/*`、Token `X-Admin-Token`） | `curl -H "X-Admin-Token: $TOKEN" http://127.0.0.1:9001/api/admin/health` |
+
+`9000` の `/api/admin/*` は `404 Admin API lives on admin port (:9001)` を返す。
 
 ### 3) DEB/RPM から（任意 / via package）
 

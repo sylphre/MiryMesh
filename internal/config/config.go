@@ -30,9 +30,10 @@ type Config struct {
 
 // ServerConfig holds controller / S3 endpoint settings.
 type ServerConfig struct {
-	Listen  string `yaml:"listen"`
-	Region  string `yaml:"region"`
-	DataDir string `yaml:"data_dir"`
+	Listen      string `yaml:"listen"`
+	AdminListen string `yaml:"admin_listen"`
+	Region      string `yaml:"region"`
+	DataDir     string `yaml:"data_dir"`
 }
 
 // DBConfig holds metadata database settings.
@@ -97,9 +98,10 @@ var (
 func Default() Config {
 	return Config{
 		Server: ServerConfig{
-			Listen:  ":9000",
-			Region:  "us-east-1",
-			DataDir: "/var/lib/mirymesh",
+			Listen:      ":9000",
+			AdminListen: ":9001",
+			Region:      "us-east-1",
+			DataDir:     "/var/lib/mirymesh",
 		},
 		DB: DBConfig{},
 		Log: LogConfig{
@@ -122,6 +124,10 @@ func Load(path string) (Config, error) {
 	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	// Fill admin_listen default if not set (existing configs with only listen).
+	if strings.TrimSpace(cfg.Server.AdminListen) == "" {
+		cfg.Server.AdminListen = ":9001"
 	}
 	return cfg, nil
 }
@@ -171,6 +177,17 @@ func (s ServerConfig) validate() error {
 	}
 	if _, _, err := net.SplitHostPort(s.Listen); err != nil {
 		return fmt.Errorf("listen %q is not a valid host:port: %w", s.Listen, err)
+	}
+	if strings.TrimSpace(s.AdminListen) == "" {
+		// Default admin listen is :9001 — validated as above, but empty is allowed as fallback (means :9001).
+		// Keep validation permissive: if explicitly set, must be host:port.
+	} else {
+		if _, _, err := net.SplitHostPort(s.AdminListen); err != nil {
+			return fmt.Errorf("admin_listen %q is not a valid host:port: %w", s.AdminListen, err)
+		}
+		if s.AdminListen == s.Listen {
+			return fmt.Errorf("admin_listen %q must not equal listen %q", s.AdminListen, s.Listen)
+		}
 	}
 	if s.Region != "" && !regionRe.MatchString(s.Region) {
 		return fmt.Errorf("region %q must match %s", s.Region, regionRe.String())

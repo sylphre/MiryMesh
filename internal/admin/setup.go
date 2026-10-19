@@ -18,17 +18,17 @@ import (
 
 // SetupState holds the persisted setup state (MVP: /var/lib/mirymesh/setup.json).
 type SetupState struct {
-	Initialized      bool   `json:"initialized"`
-	AccessKey        string `json:"access_key"`
-	SecretKey        string `json:"secret_key"`
-	AdminToken       string `json:"admin_token"`
-	DefaultPolicy    string `json:"default_policy"`
+	Initialized   bool   `json:"initialized"`
+	AccessKey     string `json:"access_key"`
+	SecretKey     string `json:"secret_key"`
+	AdminToken    string `json:"admin_token"`
+	DefaultPolicy string `json:"default_policy"`
 }
 
 // SetupStore manages setup persistence.
 type SetupStore struct {
-	mu   sync.Mutex
-	path string
+	mu    sync.Mutex
+	path  string
 	state *SetupState
 }
 
@@ -97,6 +97,33 @@ func (s *SetupStore) Save(st *SetupState) error {
 	return nil
 }
 
+// UpdatePolicy updates default policy without the already-initialized guard.
+func (s *SetupStore) UpdatePolicy(policy string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state == nil {
+		s.state = &SetupState{Initialized: true, DefaultPolicy: policy}
+	} else {
+		s.state.DefaultPolicy = policy
+	}
+	data, err := json.MarshalIndent(s.state, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
+		return err
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 func generateToken() string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
@@ -127,7 +154,11 @@ var (
 	errInvalidSecret      = &apiError{Code: 400, Msg: "secret_key must be at least 8 chars"}
 )
 
-type apiError struct{ Code int; Msg string }
+type apiError struct {
+	Code int
+	Msg  string
+}
+
 func (e *apiError) Error() string { return e.Msg }
 
 func (h *Handler) setupRoutes(mux *http.ServeMux) {
@@ -201,9 +232,7 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		h.adminToken = token
 		if h.resolver != nil && st.DefaultPolicy != "" {
 			if p, err := placement.ParsePolicy(st.DefaultPolicy); err == nil {
-				// resolver has no direct default setter — update via bucket_policy fallback is not needed; store default in resolver
-				_ = p
-				// For MVP, default policy is applied via new resolver default; we keep original resolver and just log
+				_ = h.resolver.SetDefaultPolicy(p)
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")

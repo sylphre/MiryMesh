@@ -73,6 +73,18 @@ func (r *Resolver) SetBucketPolicy(bucket string, policy Policy) error {
 	return nil
 }
 
+// SetDefaultPolicy updates the default placement policy at runtime.
+func (r *Resolver) SetDefaultPolicy(policy Policy) error {
+	if !policy.IsValid() {
+		return errInvalidPolicy
+	}
+	r.defaultPolicy = policy
+	return nil
+}
+
+// DefaultPolicy returns the current default policy.
+func (r *Resolver) DefaultPolicy() Policy { return r.defaultPolicy }
+
 var errInvalidPolicy = errPolicyInvalid
 
 // errPolicyInvalid is a sentinel for invalid policy.

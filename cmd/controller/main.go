@@ -54,34 +54,32 @@ func main() {
 	var adoptedSnapshot *metadata.EvacuationSnapshot
 	// Adoption mode: try to load latest evacuation snapshot from local + datanode remote dirs
 	// (docs/07). If found, restore buckets and log result. This enables master takeover.
-	if evacDir := os.Getenv("MIRYMESH_EVAC_DIR"); true {
-		// Local evacuation dir defaults to <DataDir>/.evac or /var/lib/mirymesh/.evac
-		localEvac := evacDir
-		if localEvac == "" {
-			localEvac = filepath.Join(cfg.Server.DataDir, ".evac")
-		}
-		// Remote dirs are datanode evac paths if configured via env or discovered from registry? For now use env MIRYMESH_REMOTE_EVAC_DIRS (comma-separated)
-		var remoteDirs []string
-		if v := os.Getenv("MIRYMESH_REMOTE_EVAC_DIRS"); v != "" {
-			for _, p := range strings.Split(v, ",") {
-				if s := strings.TrimSpace(p); s != "" {
-					remoteDirs = append(remoteDirs, s)
-				}
+	// Local evacuation dir defaults to <DataDir>/.evac or override via MIRYMESH_EVAC_DIR.
+	evacDir := os.Getenv("MIRYMESH_EVAC_DIR")
+	localEvac := evacDir
+	if localEvac == "" {
+		localEvac = filepath.Join(cfg.Server.DataDir, ".evac")
+	}
+	// Remote dirs are datanode evac paths via MIRYMESH_REMOTE_EVAC_DIRS (comma-separated).
+	var remoteDirs []string
+	if v := os.Getenv("MIRYMESH_REMOTE_EVAC_DIRS"); v != "" {
+		for _, p := range strings.Split(v, ",") {
+			if s := strings.TrimSpace(p); s != "" {
+				remoteDirs = append(remoteDirs, s)
 			}
 		}
-		snap, loadErr := metadata.LoadAny(localEvac, remoteDirs)
-		if loadErr == nil && snap != nil {
-			slog.Info("controller: evacuation snapshot found, attempting restore", "version", snap.Version, "buckets", len(snap.Buckets))
-			restorer, restorerErr := metadata.NewRestorer(cfg.Server.DataDir)
-			if restorerErr == nil {
-				if res, restoreErr := restorer.Restore(snap); restoreErr == nil {
-					slog.Info("controller: restore completed", "created", res.BucketsCreated, "restored", res.BucketsRestored, "missing", res.ObjectsMissing)
-				} else {
-					slog.Warn("controller: restore failed", "err", restoreErr)
-				}
+	}
+	if snap, loadErr := metadata.LoadAny(localEvac, remoteDirs); loadErr == nil && snap != nil {
+		slog.Info("controller: evacuation snapshot found, attempting restore", "version", snap.Version, "buckets", len(snap.Buckets))
+		restorer, restorerErr := metadata.NewRestorer(cfg.Server.DataDir)
+		if restorerErr == nil {
+			if res, restoreErr := restorer.Restore(snap); restoreErr == nil {
+				slog.Info("controller: restore completed", "created", res.BucketsCreated, "restored", res.BucketsRestored, "missing", res.ObjectsMissing)
+			} else {
+				slog.Warn("controller: restore failed", "err", restoreErr)
 			}
-			adoptedSnapshot = snap
 		}
+		adoptedSnapshot = snap
 	}
 	authStore := auth.NewStore()
 	for _, c := range cfg.Auth.Credentials {
@@ -110,19 +108,21 @@ func main() {
 		// from adoptedSnapshot.AuthIdentities (presence check only; secrets remain out-of-band).
 	}
 	// TODO: GUI will manage bucket_policy at runtime; resolver.SetBucketPolicy is the wire point.
+	jobsStore := replication.NewStore()
+	// Setup store: /var/lib/mirymesh/setup.json (MVP, merged at startup)
+	// Note: auth seeding from setup must happen before resolver/admin wiring so admin listen gets correct token.
+	// Re-create resolver/admin with updated token if setup exists.
+	setupStore := admin.NewSetupStore(cfg.Server.DataDir)
+	if st := setupStore.Get(); st != nil && st.Initialized {
+		_ = authStore.Add(st.AccessKey, st.SecretKey)
+		internalToken = st.AdminToken
+		// Rebuild resolver/admin wiring with updated token (s3Router will be built after)
+	}
 	s3Router := s3api.NewRouterWithPlacement(store, cfg.Server.Region, resolver)
 	dnHandler := datanode.NewHandler(reg, internalToken)
 	internalMux := http.NewServeMux()
 	dnHandler.RegisterRoutes(internalMux)
 
-	jobsStore := replication.NewStore()
-	// Setup store: /var/lib/mirymesh/setup.json (MVP, merged at startup)
-	setupStore := admin.NewSetupStore(cfg.Server.DataDir)
-	// If setup exists, seed auth and admin token from it
-	if st := setupStore.Get(); st != nil && st.Initialized {
-		_ = authStore.Add(st.AccessKey, st.SecretKey)
-		internalToken = st.AdminToken
-	}
 	adminHandler := admin.NewWithSetup(reg, store, resolver, jobsStore, internalToken, setupStore, authStore)
 	adminMux := http.NewServeMux()
 	adminHandler.RegisterRoutes(adminMux)
@@ -130,26 +130,36 @@ func main() {
 	staticDir := resolveStaticDir()
 	staticFS := http.FileServer(http.Dir(staticDir))
 
-	mux := http.NewServeMux()
-	mux.Handle("/api/admin/", adminMux)
-	mux.Handle("/internal/", internalMux)
-	mux.Handle("/static/", http.StripPrefix("/static/", staticFS))
+	// S3 mux: S3 + /internal/ + /healthz only (no admin). Admin requests here get 404 + hint.
+	s3Mux := http.NewServeMux()
+	s3Mux.Handle("/internal/", internalMux)
+	s3Mux.HandleFunc("/api/admin/", func(w http.ResponseWriter, r *http.Request) {
+		slog.Warn("admin API accessed on S3 port — use admin listen", "addr", cfg.Server.AdminListen, "path", r.URL.Path)
+		http.Error(w, "admin API lives on admin port ("+cfg.Server.AdminListen+") — use that port with X-Admin-Token", http.StatusNotFound)
+	})
+	s3Mux.Handle("/healthz", healthHandler())
+	s3Mux.Handle("/health", healthHandler())
+	s3Served := s3api.AuthMiddleware(authStore, s3Router)
+	// S3 catch-all: "/" is pure S3 ListBuckets (no GUI fallback)
+	s3Mux.Handle("/", s3Served)
+
+	// Admin mux: /api/admin/* + /static/* + / + setup redirect. No S3 here.
+	adminMuxWithStatic := http.NewServeMux()
+	// Mount admin API
+	adminMuxWithStatic.Handle("/api/admin/", adminMux)
+	adminMuxWithStatic.Handle("/static/", http.StripPrefix("/static/", staticFS))
 	// Setup wizard redirect: if not initialized, browser hits to / should go to setup.html
 	setupIsNeeded := !setupStore.IsInitialized() && len(cfg.Auth.Credentials) == 0
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// GUI entry lives at /static/index.html and /admin; root "/" is S3 ListBuckets.
-		// Only redirect browser hits that explicitly accept text/html to the GUI.
-		if r.URL.Path == "/" && r.Header.Get("Authorization") == "" && r.URL.Query().Get("X-Amz-Algorithm") == "" {
-			if contains(r.Header.Get("Accept"), "text/html") {
-				if setupIsNeeded {
-					http.Redirect(w, r, "/static/setup.html", http.StatusFound)
-					return
-				}
-				http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
+	adminMuxWithStatic.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			if setupIsNeeded {
+				http.Redirect(w, r, "/static/setup.html", http.StatusFound)
 				return
 			}
+			http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
+			return
 		}
-		s3api.AuthMiddleware(authStore, s3Router).ServeHTTP(w, r)
+		http.NotFound(w, r)
 	})
 
 	go func() {
@@ -163,29 +173,37 @@ func main() {
 		}
 	}()
 
+	adminListen := cfg.Server.AdminListen
+	if adminListen == "" {
+		adminListen = ":9001"
+	}
+	slog.Info("mirymesh-controller: admin listen", "addr", adminListen, "hint", "keep on Tailscale / 127.0.0.1, do not expose to public")
+	slog.Info("mirymesh-controller starting", "listen", cfg.Server.Listen, "dataDir", cfg.Server.DataDir, "region", cfg.Server.Region, "adminListen", adminListen)
+	adminSrv := &http.Server{Addr: adminListen, Handler: adminMuxWithStatic, ReadTimeout: 30 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 120 * time.Second}
+	go func() {
+		if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("admin listen failed", "err", err)
+		}
+	}()
+
 	srv := &http.Server{
 		Addr:         cfg.Server.Listen,
-		Handler:      mux,
+		Handler:      s3Mux,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
-	slog.Info("mirymesh-controller starting", "listen", cfg.Server.Listen, "dataDir", cfg.Server.DataDir, "region", cfg.Server.Region)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, "controller: listen: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func contains(s, sub string) bool { return len(s) >= len(sub) && indexOf(s, sub) >= 0 }
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
+func healthHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("ok"))
+	})
 }
 
 func resolveStaticDir() string {
