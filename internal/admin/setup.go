@@ -36,6 +36,12 @@ type SetupState struct {
 	DatanodePaths     string `json:"datanode_paths,omitempty"` // comma-separated
 }
 
+// SetupStoreIfaceUpdater is an optional extension for post-init S3 update.
+type SetupStoreIfaceUpdater interface {
+	SetupStoreIface
+	Update(*SetupState) error
+}
+
 // SetupStore manages setup persistence.
 type SetupStore struct {
 	mu    sync.Mutex
@@ -251,6 +257,61 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		h.handleSetupStatus(w, r)
 	case http.MethodPost:
 		if h.setupStore.IsInitialized() {
+			// Step2: S3/DB config via X-Admin-Token (already initialized)
+			if !h.checkAuth(w, r) {
+				return
+			}
+			// Try Update path (DB) or file Save fallback
+			if updater, ok := h.setupStore.(SetupStoreIfaceUpdater); ok {
+				// Parse same payload and update
+				var req2 struct {
+					AccessKey     string `json:"access_key"`
+					SecretKey     string `json:"secret_key"`
+					DefaultPolicy string `json:"default_policy"`
+					Region        string `json:"region"`
+					Gateway       bool   `json:"gateway"`
+					DatanodePaths string `json:"datanode_paths"`
+					DBDriver      string `json:"db_driver"`
+					DBDSN         string `json:"db_dsn"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&req2)
+				// Build from existing + new values
+				cur := h.setupStore.Get()
+				if cur != nil {
+					if strings.TrimSpace(req2.AccessKey) != "" {
+						cur.AccessKey = strings.TrimSpace(req2.AccessKey)
+					}
+					if strings.TrimSpace(req2.SecretKey) != "" {
+						cur.SecretKey = req2.SecretKey
+					}
+					if req2.DefaultPolicy != "" {
+						cur.DefaultPolicy = strings.ToLower(req2.DefaultPolicy)
+					}
+					if req2.Region != "" {
+						cur.Region = req2.Region
+					}
+					cur.Gateway = req2.Gateway
+					if req2.DatanodePaths != "" {
+						cur.DatanodePaths = req2.DatanodePaths
+					}
+					if req2.DBDriver != "" {
+						cur.DBDriver = req2.DBDriver
+					}
+					if req2.DBDSN != "" {
+						cur.DBDSN = req2.DBDSN
+					}
+					if err := updater.Update(cur); err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+				}
+				if h.authStore != nil && cur != nil {
+					_ = h.authStore.Add(cur.AccessKey, cur.SecretKey)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"admin_token": cur.AdminToken, "default_policy": cur.DefaultPolicy})
+				return
+			}
 			http.Error(w, "already initialized", http.StatusForbidden)
 			return
 		}
@@ -374,6 +435,9 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleGenerateCredentials(w http.ResponseWriter, r *http.Request) {
+	if !h.checkAuth(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost && r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

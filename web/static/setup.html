@@ -87,7 +87,7 @@
     step1.style.display = "";
     step1.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const data = { username: step1.elements.username.value, password: step1.elements.password.value };
+      const data = { username: step1.elements.username.value, password: step1.elements.password.value, access_key: "", secret_key: "" };
       try {
         const res = await fetch("/api/admin/setup", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(data) });
         if (!res.ok) throw new Error(await res.text());
@@ -122,10 +122,20 @@
       }
     });
     document.getElementById("gen-ak").addEventListener("click", async () => {
-      try { const r = await fetch("/api/admin/generate-credentials", {method:"POST"}); const j = await r.json(); step2.elements.access_key.value = j.access_key; } catch {}
+      try {
+        const token = localStorage.getItem("mirymesh_admin_token") || "";
+        const r = await fetch("/api/admin/generate-credentials", {method:"POST", headers: {"X-Admin-Token": token}});
+        if (!r.ok) throw new Error(await r.text());
+        const j = await r.json(); step2.elements.access_key.value = j.access_key;
+      } catch {}
     });
     document.getElementById("gen-sk").addEventListener("click", async () => {
-      try { const r = await fetch("/api/admin/generate-credentials", {method:"POST"}); const j = await r.json(); step2.elements.secret_key.value = j.secret_key; } catch {}
+      try {
+        const token = localStorage.getItem("mirymesh_admin_token") || "";
+        const r = await fetch("/api/admin/generate-credentials", {method:"POST", headers: {"X-Admin-Token": token}});
+        if (!r.ok) throw new Error(await r.text());
+        const j = await r.json(); step2.elements.secret_key.value = j.secret_key;
+      } catch {}
     });
     // Also allow client-side preview
     document.getElementById("gen-ak").addEventListener("click", () => { if (!step2.elements.access_key.value) { const a = new Uint8Array(10); crypto.getRandomValues(a); step2.elements.access_key.value = Array.from(a, b => "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[b%36]).join(""); }});

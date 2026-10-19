@@ -6,8 +6,11 @@ package admin
 import "net/http"
 
 func (h *Handler) checkAuth(w http.ResponseWriter, r *http.Request) bool {
-	// Allow setup/login without token
-	if r.URL.Path == "/api/admin/setup" || r.URL.Path == "/api/admin/setup/status" || r.URL.Path == "/api/admin/login" {
+	// Allow setup/status and login without token (setup/status and setup POST when uninitialized, login after init)
+	if r.URL.Path == "/api/admin/setup/status" || r.URL.Path == "/api/admin/login" {
+		return true
+	}
+	if r.URL.Path == "/api/admin/setup" && r.Method == "POST" && !h.setupStore.IsInitialized() {
 		return true
 	}
 	if h.adminToken == "" {
