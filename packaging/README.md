@@ -7,7 +7,8 @@ Supported distros (docs/01): Debian 12/13, Ubuntu 24.04/26.04 LTS, AlmaLinux 9/1
 - `systemd/` — unit files (`mirymesh-controller.service`, `mirymesh-datanode.service`) + `/etc/mirymesh/config.yaml` + `/var/lib/mirymesh`, `/var/log` layout.
 - `nfpm.yaml` — unified `nfpm` config for DEB+RPM (single file, `--packager deb/rpm`). `packaging/scripts/{pre,post}{install,remove}.sh` create `mirymesh:mirymesh` idempotently; see `User=mirymesh` in systemd units.
 - `config/config.yaml.example` — example for `/etc/mirymesh/config.yaml`.
-- `nginx/nginx.conf.example` — NGINX reverse-proxy example: S3 `:9000` (TLS + SigV4 passthrough, `client_max_body_size 5G`, `proxy_request_buffering off`) and Admin `:9001` bound to `127.0.0.1` / Tailscale IP only (`allow 100.64.0.0/10; deny all` or mTLS). Copy to `/etc/nginx/sites-available/mirymesh` and adjust `server_name`/certs.
+- `nginx/nginx.conf.example` — NGINX reverse-proxy example: S3 `:9000` (TLS + SigV4 passthrough, `client_max_body_size 5G`, `proxy_request_buffering off`) and Admin `:9001` bound to `127.0.0.1` / Tailscale IP only (`allow 100.64.0.0/10; deny all` or mTLS). Copy to `/etc/nginx/sites-available/mirymesh` and adjust `server_name`/certs. Admin direct access (no NGINX) is also fine — bind `admin_listen: 127.0.0.1:9001` and access directly (see below and `SECURITY.md`).
+- `haproxy/haproxy.cfg.example` — haproxy example for your setup (haproxy terminates TLS, S3 on `:80` → `127.0.0.1:9000`, `option forwardfor`, `Authorization` passthrough). Admin is direct `127.0.0.1:9001` / Tailscale IP (no public haproxy frontend).
 - `docker/Dockerfile` — multi-stage Dockerfile (golang:1.22-bookworm + distroless/static) + pinned toolchain.
 
 Reproducible build: `go 1.22` pinned in `go.mod` + `GOWORK=off`, no cgo required in M4.

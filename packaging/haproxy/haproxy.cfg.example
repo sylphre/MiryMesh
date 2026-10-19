@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+# MiryMesh haproxy example — S3 on :80 (TLS terminated at haproxy) + Admin direct access.
+#
+# Your setup: haproxy does TLS termination, MiryMesh S3 listens on :9000, admin on :9001.
+# This haproxy frontend listens on :80/:443 and forwards S3 to 127.0.0.1:9000.
+# For S3 SigV4, haproxy MUST forward Authorization / X-Amz-Date / X-Amz-Content-Sha256.
+# haproxy forwards all headers by default; do NOT strip Authorization.
+#
+# Admin: do NOT expose via haproxy public frontend. Access admin directly via
+#   https://tailscale-ip:9001 or http://127.0.0.1:9001 (bind admin_listen to 127.0.0.1 or Tailscale IP).
+#   If you must expose admin via haproxy, use a separate frontend bound to Tailscale IP with ACL / mTLS.
+
+global
+    log /dev/log local0
+    maxconn 4096
+
+defaults
+    log global
+    mode http
+    option httplog
+    timeout connect 5s
+    timeout client 300s
+    timeout server 300s
+    # S3 large uploads: do not buffer
+    option http-buffer-request
+
+frontend s3_http
+    bind *:80
+    # If haproxy terminates TLS, also:
+    # bind *:443 ssl crt /etc/haproxy/certs/s3.example.com.pem alpn h2,http/1.1
+    # redirect scheme https if !{ ssl_fc }
+    acl is_health path /healthz
+    use_backend mirymesh_health if is_health
+    default_backend mirymesh_s3
+
+frontend s3_health
+    bind 127.0.0.1:8080
+    acl is_health path /healthz
+    http-request return status 200 content-type text/plain string "ok" if is_health
+
+backend mirymesh_s3
+    # S3 controller
+    server mirymesh 127.0.0.1:9000 check
+    # Preserve forwarding headers (haproxy adds X-Forwarded-For by default if option forwardfor)
+    option forwardfor
+    http-request set-header X-Forwarded-Proto http if !{ ssl_fc }
+    http-request set-header X-Forwarded-Proto https if { ssl_fc }
+    # Large uploads
+    # (timeout already set in defaults)
+
+backend mirymesh_health
+    server mirymesh 127.0.0.1:9000 check
+    option forwardfor
+
+# --- Admin direct access (no haproxy) ---
+# MiryMesh admin_listen: "127.0.0.1:9001"  # or "100.x.y.z:9001" (tailscale ip -4)
+# Access: curl -H "X-Admin-Token: $TOKEN" http://127.0.0.1:9001/api/admin/health
+# If you want haproxy for admin (Tailscale only), add a separate frontend:
+# frontend admin_tailscale
+#     bind 100.x.y.z:9001 ssl crt /etc/haproxy/certs/admin.pem
+#     acl allowed src 100.64.0.0/10 127.0.0.1
+#     http-request deny unless allowed
+#     default_backend mirymesh_admin
+# backend mirymesh_admin
+#     server mirymesh 127.0.0.1:9001 check
+#     option forwardfor

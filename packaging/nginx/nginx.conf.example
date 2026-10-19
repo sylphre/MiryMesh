@@ -2,14 +2,14 @@
 # Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
 # MiryMesh NGINX example — S3 on :9000, Admin on :9001 (Tailscale/localhost only).
 #
-# Usage:
-#   sudo cp packaging/nginx/nginx.conf.example /etc/nginx/sites-available/mirymesh
-#   sudo ln -s /etc/nginx/sites-available/mirymesh /etc/nginx/sites-enabled/mirymesh
-#   sudo nginx -t && sudo systemctl reload nginx
+# Patterns in this repo:
+#   - nginx (here): example reverse proxy (TLS / allow / mTLS)
+#   - haproxy SSL termination + :80 passthrough: see packaging/nginx/README.md and packaging/haproxy/haproxy.cfg.example
+#   - Admin direct access (no NGINX): bind admin_listen to 127.0.0.1:9001 or Tailscale IP and access https://tailscale-ip:9001 directly (X-Admin-Token required)
 #
-# This example shows two patterns:
+# This NGINX example shows two patterns:
 #   1) Public S3 behind NGINX (TLS + SigV4 passthrough): proxy_pass to 127.0.0.1:9000
-#   2) Admin on localhost/Tailscale ONLY: listen 127.0.0.1:9001 (or Tailscale IP) with allow/deny or bind to 127.0.0.1
+#   2) Admin on localhost/Tailscale ONLY: listen 127.0.0.1:9001 (or Tailscale IP) with allow/deny or bind to 127.0.0.1 — or skip NGINX and use admin direct access
 #
 # Adjust server_name, TLS certs, and allow rules for your environment.
 # Do NOT expose admin (9001) to 0.0.0.0 public without IP ACL or mTLS.
