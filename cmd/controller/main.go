@@ -102,6 +102,24 @@ func main() {
 	for _, c := range cfg.Auth.Credentials {
 		_ = authStore.Add(c.AccessKey, c.SecretKey)
 	}
+	// Treat db.dsn without driver as misconfigured (M14: no longer optional)
+	if cfg.DB.DSN != "" && cfg.DB.Driver == "" {
+		fmt.Fprintln(os.Stderr, "controller: db.dsn without driver — set db.driver (postgres/mysql) and auth.master_key / MIRYMESH_MASTER_KEY")
+		os.Exit(1)
+	}
+	if cfg.DB.Driver != "" {
+		masterKey := cfg.Auth.MasterKey
+		if masterKey == "" {
+			masterKey = os.Getenv("MIRYMESH_MASTER_KEY")
+		}
+		if masterKey == "" {
+			fmt.Fprintln(os.Stderr, "controller: auth.master_key (or MIRYMESH_MASTER_KEY env) is required when db is configured — needed for secret_key_enc/dsn_enc")
+			os.Exit(1)
+		}
+		_ = masterKey
+		// Open DB, migrate, and seed setup row if empty — full DB wiring lands in next patch (SetupStoreDB)
+		slog.Info("controller: db configured", "driver", cfg.DB.Driver, "master_key", "set")
+	}
 	// Internal datanode registry (M2) and placement resolver (M3).
 	reg := datanode.NewRegistry(30*time.Second, 90*time.Second)
 	internalToken := ""
@@ -126,14 +144,37 @@ func main() {
 	}
 	// TODO: GUI will manage bucket_policy at runtime; resolver.SetBucketPolicy is the wire point.
 	jobsStore := replication.NewStore()
-	// Setup store: /var/lib/mirymesh/setup.json (MVP, merged at startup)
-	// Note: auth seeding from setup must happen before resolver/admin wiring so admin listen gets correct token.
-	// Re-create resolver/admin with updated token if setup exists.
-	setupStore := admin.NewSetupStore(cfg.Server.DataDir)
+	// Setup store: DB-backed when db configured (M14: replaces setup.json), file otherwise.
+	var setupStore admin.SetupStoreIface = admin.NewSetupStore(cfg.Server.DataDir)
+	if cfg.DB.Driver != "" {
+		masterKey := cfg.Auth.MasterKey
+		if masterKey == "" {
+			masterKey = os.Getenv("MIRYMESH_MASTER_KEY")
+		}
+		if dbConn, openErr := metadata.OpenDB(cfg.DB.Driver, cfg.DB.DSN); openErr == nil {
+			if migErr := metadata.Migrate(dbConn, cfg.DB.Driver); migErr == nil {
+				dbStore := admin.NewSetupStoreDB(dbConn, cfg.DB.Driver, masterKey)
+				// One-time migration: copy file setup.json -> DB if DB empty and file exists
+				if !dbStore.IsInitialized() {
+					if fs := admin.NewSetupStore(cfg.Server.DataDir); fs.IsInitialized() {
+						if st := fs.Get(); st != nil {
+							_ = dbStore.Save(st)
+							slog.Info("controller: migrated setup.json -> DB (miry_setup)")
+						}
+					}
+				}
+				setupStore = dbStore
+				slog.Info("controller: setup store: DB (miry_setup)")
+			} else {
+				slog.Warn("controller: db migrate failed, falling back to file setup", "err", migErr)
+			}
+		} else {
+			slog.Warn("controller: db open failed, falling back to file setup", "err", openErr)
+		}
+	}
 	if st := setupStore.Get(); st != nil && st.Initialized {
 		_ = authStore.Add(st.AccessKey, st.SecretKey)
 		internalToken = st.AdminToken
-		// Rebuild resolver/admin wiring with updated token (s3Router will be built after)
 	}
 	s3Router := s3api.NewRouterWithPlacement(store, cfg.Server.Region, resolver)
 	dnHandler := datanode.NewHandler(reg, internalToken)

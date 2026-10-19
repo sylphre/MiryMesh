@@ -60,10 +60,10 @@ type StorageConfig struct {
 }
 
 // AuthConfig holds S3 credential settings for standalone / single-node mode.
-// In M1 the controller stores credentials in config file. Future milestones
-// will persist them in the metadata DB.
+// Setup is now DB-backed (miry_setup.secret_key_enc); config credentials remain for file-mode fallback.
 type AuthConfig struct {
 	Credentials []Credential `yaml:"credentials"`
+	MasterKey   string       `yaml:"master_key"` // 32-byte hex/base64 or >=32 chars; also MIRYMESH_MASTER_KEY env
 }
 
 // Credential is a single S3 access key / secret pair.
@@ -289,6 +289,10 @@ func (a AuthConfig) validate() error {
 			return fmt.Errorf("credentials[%d].access_key %q is duplicated", i, c.AccessKey)
 		}
 		seen[c.AccessKey] = true
+	}
+	if strings.TrimSpace(a.MasterKey) == "" && os.Getenv("MIRYMESH_MASTER_KEY") == "" && (a.Credentials == nil || len(a.Credentials) == 0) {
+		// Master key is required for DB-backed setup (secret_key_enc/dsn_enc). Allow file-mode with credentials.
+		// No-op here — enforced at controller startup when DB is configured.
 	}
 	return nil
 }

@@ -143,7 +143,9 @@ P0 と `2006-03-01` は S3 互換の核だが、MiryMesh 固有の配置・容�
 
 ## 設定 / Configuration
 
-`packaging/config/config.yaml.example` を起点に `/etc/mirymesh/config.yaml`（`0600`）を配置。`auth.credentials`（`AccessKey/SecretKey`）、`server.region` / `data_dir`、`storage.default_policy`（`single/dual/triple/ALL`）。詳細は `internal/config` の集中バリデーションを参照。
+`packaging/config/config.yaml.example` を起点に `/etc/mirymesh/config.yaml`（`0600`）を配置。`auth.credentials`（`AccessKey/SecretKey`）、`server.region` / `data_dir`、`storage.default_policy`（`single/dual/triple/ALL`）。DBは `auth.master_key` と `db.driver/dsn` を設定して `MIRYMESH_MASTER_KEY` を環境変数でも可。`secret_key_enc`/`db_dsn_enc` は `MIRYMESH_MASTER_KEY` による AES-GCM で暗号化され、`miry_setup` テーブルへ永続化される。詳細は `internal/config` の集中バリデーションを参照。
+
+> **既存環境のDB一括移行（M14）**: `/var/lib/mirymesh/setup.json` が残っていれば、DB（`db.driver`+`MIRYMESH_MASTER_KEY`）を設定して再起動すると初回だけ `miry_setup` へ自動移行される（`setup.json` はそのまま残置、削除は手動）。移行後は全てDBで動作。
 
 ## Documentation
 

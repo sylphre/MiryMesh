@@ -13,6 +13,14 @@ import (
 	"github.com/sylphre/MiryMesh/internal/s3api"
 )
 
+// SetupStoreIface is implemented by file (*SetupStore) and DB (*SetupStoreDB).
+type SetupStoreIface interface {
+	IsInitialized() bool
+	Get() *SetupState
+	Save(*SetupState) error
+	UpdatePolicy(string) error
+}
+
 // Handler serves management API under /api/admin/*.
 // It is intended for the GUI and CLI; S3 API remains under / (SigV4).
 // Auth is placeholder: if adminToken is non-empty, requests must carry
@@ -24,7 +32,7 @@ type Handler struct {
 	resolver   *placement.Resolver
 	jobs       *replication.Store
 	adminToken string
-	setupStore *SetupStore
+	setupStore SetupStoreIface
 	authStore  *auth.Store
 }
 
@@ -34,7 +42,7 @@ func New(reg *datanode.Registry, storage s3api.ObjectStore, resolver *placement.
 }
 
 // NewWithSetup creates a Handler with optional setup/auth stores.
-func NewWithSetup(reg *datanode.Registry, storage s3api.ObjectStore, resolver *placement.Resolver, jobs *replication.Store, adminToken string, setup *SetupStore, authStore *auth.Store) *Handler {
+func NewWithSetup(reg *datanode.Registry, storage s3api.ObjectStore, resolver *placement.Resolver, jobs *replication.Store, adminToken string, setup SetupStoreIface, authStore *auth.Store) *Handler {
 	if jobs == nil {
 		jobs = replication.NewStore()
 	}
