@@ -14,6 +14,7 @@ auth:
 storage:
   default_policy: "single"
 datanode:
+  listen: "0.0.0.0:9002" # DataNode: Tailscale 100.114.64.41:9002 or localhost. Do NOT expose to public; firewall/Tailscale ACL
   controller_url: "http://127.0.0.1:9000"
   paths: ["/mnt/mirymesh/disk1"]
 log:

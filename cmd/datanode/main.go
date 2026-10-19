@@ -70,7 +70,10 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	// Listen on :9002 by default (DataNode)
-	listen := "0.0.0.0:9002"
+	listen := cfg.Datanode.Listen
+	if listen == "" {
+		listen = "0.0.0.0:9002"
+	}
 	go func() {
 		slog.Info("datanode: listening", "addr", listen, "hint", "0.0.0.0:9002 on Tailscale 100.114.64.41:9002; do not expose to public, keep behind firewall/Tailscale ACL")
 		if err := http.ListenAndServe(listen, mux); err != nil {

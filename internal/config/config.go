@@ -48,6 +48,7 @@ type DBConfig struct {
 type DatanodeConfig struct {
 	ControllerURL string   `yaml:"controller_url"`
 	Paths         []string `yaml:"paths"`
+	Listen        string   `yaml:"listen"` // DataNode listen, default "0.0.0.0:9002" (Tailscale 100.114.64.41:9002)
 }
 
 // StorageConfig holds replication / placement settings for controller.
@@ -108,6 +109,7 @@ func Default() Config {
 		Datanode: DatanodeConfig{
 			ControllerURL: "http://127.0.0.1:9000",
 			Paths:         nil,
+			Listen:        "0.0.0.0:9002",
 		},
 		DB: DBConfig{},
 		Log: LogConfig{
@@ -138,6 +140,9 @@ func Load(path string) (Config, error) {
 	// Fill Listen if empty
 	if strings.TrimSpace(cfg.Server.Listen) == "" {
 		cfg.Server.Listen = "0.0.0.0:9000"
+	}
+	if strings.TrimSpace(cfg.Datanode.Listen) == "" {
+		cfg.Datanode.Listen = "0.0.0.0:9002"
 	}
 	// Normalize gateway alias
 	if cfg.Storage.Gateway {
@@ -255,6 +260,11 @@ func (d DatanodeConfig) validate() error {
 	if d.ControllerURL != "" {
 		if !strings.HasPrefix(d.ControllerURL, "http://") && !strings.HasPrefix(d.ControllerURL, "https://") {
 			return fmt.Errorf("controller_url %q must start with http:// or https://", d.ControllerURL)
+		}
+	}
+	if strings.TrimSpace(d.Listen) != "" {
+		if _, _, err := net.SplitHostPort(d.Listen); err != nil {
+			return fmt.Errorf("datanode.listen %q is not a valid host:port: %w", d.Listen, err)
 		}
 	}
 	return nil
