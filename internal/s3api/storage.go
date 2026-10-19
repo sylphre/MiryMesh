@@ -38,6 +38,28 @@ type Storage struct {
 	buckets map[string]struct{}
 	// meta cache: bucket -> key -> meta
 	meta map[string]map[string]ObjectMeta
+	// multipart in-progress uploads: uploadID -> upload
+	uploads map[string]*MultipartUploadState
+}
+
+// MultipartUploadState holds in-progress multipart state (M6).
+type MultipartUploadState struct {
+	UploadID    string
+	Bucket      string
+	Key         string
+	ContentType string
+	Meta        map[string]string
+	Initiated   time.Time
+	Parts       map[int]PartRecord
+}
+
+// PartRecord describes a single uploaded part.
+type PartRecord struct {
+	PartNumber int
+	ETag       string
+	Size       int64
+	LastMod    time.Time
+	Path       string
 }
 
 // NewStorage creates a storage rooted at dir.
@@ -52,7 +74,7 @@ func NewStorage(root string) (*Storage, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Storage{root: abs, buckets: make(map[string]struct{}), meta: make(map[string]map[string]ObjectMeta)}
+	s := &Storage{root: abs, buckets: make(map[string]struct{}), meta: make(map[string]map[string]ObjectMeta), uploads: make(map[string]*MultipartUploadState)}
 	// Discover existing buckets on disk.
 	entries, err := os.ReadDir(abs)
 	if err != nil {
@@ -60,6 +82,9 @@ func NewStorage(root string) (*Storage, error) {
 	}
 	for _, e := range entries {
 		if e.IsDir() {
+			if e.Name() == ".multipart" {
+				continue
+			}
 			s.buckets[e.Name()] = struct{}{}
 			s.meta[e.Name()] = make(map[string]ObjectMeta)
 		}

@@ -95,23 +95,42 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if q.Has("uploads") {
-				// M1: abort/pending multipart not yet — return empty.
-				writeXMLError(w, r, http.StatusNotImplemented, "NotImplemented", "ListMultipartUploads is not implemented")
+				rt.handleListMultipartUploads(w, r, bucket)
 				return
 			}
 			// ListObjectsV2 or ListObjects v1 shim.
 			rt.handleListObjectsV2(w, r, bucket)
 			return
+		case http.MethodPost:
+			if q.Has("uploads") {
+				// POST /{bucket}?uploads is not used; object-level uses POST ?uploads
+				writeError(w, r, errInvalidRequest)
+				return
+			}
 		}
 	}
 
 	// Object-level operations: /{bucket}/{key}
 	if !isBucketOp || key != "" {
-		// Multipart query params imply NotImplemented for now unless it's simple abort.
-		if q.Has("uploadId") || q.Has("uploads") || q.Has("partNumber") {
-			// For M1, all multipart ops are NotImplemented except we could handle single-part Put via regular Put.
-			// But UploadPart etc must be 501.
-			writeError(w, r, errNotImplemented)
+		// Multipart dispatch
+		if q.Has("uploadId") && q.Has("partNumber") && r.Method == http.MethodPut {
+			rt.handleUploadPart(w, r, bucket, key)
+			return
+		}
+		if q.Has("uploadId") && r.Method == http.MethodGet {
+			rt.handleListParts(w, r, bucket, key)
+			return
+		}
+		if q.Has("uploadId") && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
+			if r.Method == http.MethodDelete {
+				rt.handleAbortMultipart(w, r, bucket, key)
+				return
+			}
+			rt.handleCompleteMultipart(w, r, bucket, key)
+			return
+		}
+		if q.Has("uploads") && r.Method == http.MethodPost {
+			rt.handleCreateMultipartUpload(w, r, bucket, key)
 			return
 		}
 		switch r.Method {
@@ -133,8 +152,12 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rt.handleDeleteObject(w, r, bucket, key)
 			return
 		case http.MethodPost:
-			// CompleteMultipartUpload / Select etc.
-			writeError(w, r, errNotImplemented)
+			// POST /{bucket}/{key}?uploads -> create, otherwise Complete already handled
+			if q.Has("uploads") {
+				rt.handleCreateMultipartUpload(w, r, bucket, key)
+				return
+			}
+			writeXMLError(w, r, http.StatusNotImplemented, "NotImplemented", "operation is not implemented")
 			return
 		}
 	}
