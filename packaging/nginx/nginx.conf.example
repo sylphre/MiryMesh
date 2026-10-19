@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+# MiryMesh NGINX example — S3 on :9000, Admin on :9001 (Tailscale/localhost only).
+#
+# Usage:
+#   sudo cp packaging/nginx/nginx.conf.example /etc/nginx/sites-available/mirymesh
+#   sudo ln -s /etc/nginx/sites-available/mirymesh /etc/nginx/sites-enabled/mirymesh
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# This example shows two patterns:
+#   1) Public S3 behind NGINX (TLS + SigV4 passthrough): proxy_pass to 127.0.0.1:9000
+#   2) Admin on localhost/Tailscale ONLY: listen 127.0.0.1:9001 (or Tailscale IP) with allow/deny or bind to 127.0.0.1
+#
+# Adjust server_name, TLS certs, and allow rules for your environment.
+# Do NOT expose admin (9001) to 0.0.0.0 public without IP ACL or mTLS.
+
+# --- S3 (public or VPC) ---
+# S3 clients (Nextcloud/Misskey/rclone) must send SigV4; NGINX must NOT strip Authorization.
+upstream mirymesh_s3 {
+    server 127.0.0.1:9000;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name s3.example.com;
+
+    # TLS — replace with your certs (or use certbot)
+    # ssl_certificate     /etc/nginx/tls/s3.example.com.crt;
+    # ssl_certificate_key /etc/nginx/tls/s3.example.com.key;
+    # ssl_protocols TLSv1.2 TLSv1.3;
+
+    client_max_body_size 5G;
+    # S3 streaming: do not buffer to disk
+    proxy_request_buffering off;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # Preserve SigV4 headers
+    proxy_set_header Authorization $http_authorization;
+    proxy_set_header X-Amz-Date $http_x_amz_date;
+    proxy_set_header X-Amz-Content-Sha256 $http_x_amz_content_sha256;
+
+    location / {
+        proxy_pass http://mirymesh_s3;
+        # Large uploads: increase timeouts
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    # Optional: health check without SigV4
+    location = /healthz {
+        proxy_pass http://mirymesh_s3;
+        access_log off;
+    }
+}
+
+# --- Admin (private: localhost / Tailscale) ---
+# Bind to loopback or Tailscale IP only. Do NOT use listen 9001 (0.0.0.0) for admin.
+# To bind Tailscale: replace 127.0.0.1 with e.g. 100.x.y.z (tailscale ip -4)
+upstream mirymesh_admin {
+    server 127.0.0.1:9001;
+}
+
+server {
+    listen 127.0.0.1:9001;
+    # For Tailscale: also listen 100.x.y.z:9001 ssl; or use a separate server block
+    # listen 100.x.y.z:9001 ssl http2;
+
+    server_name _;
+
+    # Admin should still be TLS if exposed via Tailscale/reverse proxy
+    # ssl_certificate     /etc/nginx/tls/admin.example.com.crt;
+    # ssl_certificate_key /etc/nginx/tls/admin.example.com.key;
+
+    # IP allowlist — adjust to your Tailscale CIDR or remove if binding to 127.0.0.1
+    # allow 127.0.0.1;
+    # allow 100.64.0.0/10;  # Tailscale CGNAT
+    # deny all;
+
+    client_max_body_size 10M;
+
+    # Admin token is required (X-Admin-Token); NGINX can optionally enforce mTLS
+    # ssl_verify_client on;
+    # ssl_client_certificate /etc/nginx/tls/ca.crt;
+
+    location / {
+        proxy_pass http://mirymesh_admin;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Pass admin token through (do not log it)
+        proxy_set_header X-Admin-Token $http_x_admin_token;
+        access_log off;  # or filter Authorization/X-Admin-Token from logs
+    }
+}
