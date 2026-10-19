@@ -79,7 +79,35 @@ docker run -p 9000:9000 -v /var/lib/mirymesh:/var/lib/mirymesh mirymesh:dev
 
 ## S3 互換 / S3 compatibility
 
-P0（`docs/06`）：`Put/Get/Delete/List/Head`、`CopyObject`、`DeleteObjects`、`multipart`（Nextcloud / Misskey で検証: `forcePathStyle` / `requestChecksumCalculation`）。`GET /` の `2006-03-01` XML xmlns を満たし、エラーも `application/xml`（`NoSuchBucket`/`NoSuchKey` 等）で返却。`2006-03-01` は API バージョン識別子であり、AWS 側の操作追加とは独立して追跡。
+P0（Nextcloud / Misskey が実利用する最小セット）は全て実装済み。`GET /` の `2006-03-01` XML `xmlns` を満たし、エラーも `application/xml`（`NoSuchBucket`/`NoSuchKey` 等）で返却。`2006-03-01` は API バージョン識別子であり、AWS 側の操作追加とは独立して追跡（[AWS S3 API Reference `2006-03-01`](https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html) を一次参照）。
+
+| S3 操作 | HTTP | 状態 | 備考 |
+|---|---|---|---|
+| `ListBuckets` | `GET /` | ✅ | `2006-03-01` xmlns |
+| `HeadBucket` | `HEAD /{bucket}` | ✅ | `X-Amz-Bucket-Region` |
+| `CreateBucket` | `PUT /{bucket}` | ✅ | `InvalidBucketName 400` / `BucketAlreadyOwnedByYou 409` |
+| `DeleteBucket` | `DELETE /{bucket}` | ✅ | `BucketNotEmpty 409` |
+| `GetBucketLocation` | `GET /{bucket}?location` | ✅ | |
+| `ListObjectsV2` | `GET /{bucket}?list-type=2` | ✅ | `prefix/delimiter/max-keys/encoding-type=url/continuation-token` + `CommonPrefixes` |
+| `HeadObject` | `HEAD /{bucket}/{key}` | ✅ | `If-None-Match`/`If-Modified-Since` → `304` |
+| `GetObject` | `GET /{bucket}/{key}` | ✅ | `Range: bytes=` → `206`, `ETag`/`Content-Type`/`x-amz-meta-*` |
+| `PutObject` | `PUT /{bucket}/{key}` | ✅ | ストリーム `io.Copy+md5`（5GiB 対応）, `x-amz-meta-*` |
+| `DeleteObject` | `DELETE /{bucket}/{key}` | ✅ | 冪等 `204` |
+| `CopyObject` | `PUT x-amz-copy-source` | ✅ | `COPY/REPLACE` + `x-amz-copy-source-if-*` → `412`, 5GiB 制限, `?versionId` 無視 |
+| `DeleteObjects` | `POST /?delete` | ✅ | 1000 件, `<DeleteResult>`, `Quiet` |
+| `CreateMultipartUpload` | `POST ?uploads` | ✅ | |
+| `UploadPart` | `PUT ?uploadId&partNumber` | ✅ | ストリーム |
+| `UploadPartCopy` | `PUT ?uploadId&partNumber x-amz-copy-source` | ✅ | `x-amz-copy-source-range` 対応 |
+| `ListParts` | `GET ?uploadId` | ✅ | |
+| `CompleteMultipartUpload` | `POST ?uploadId + XML` | ✅ | `ETag = hex(md5(concat md5s))-N`, ストリーム連結 |
+| `AbortMultipartUpload` | `DELETE ?uploadId` | ✅ | |
+| `ListMultipartUploads` | `GET /{bucket}?uploads` | ✅ | |
+| SigV4（header / presigned + `UNSIGNED-PAYLOAD`） | — | ✅ | RFC3986 `%20` 正規化, 時計 ±15 分 |
+
+P1 は `UploadPartCopy` を含めほぼ完了。`GetObjectAttributes` は P2 として `501 NotImplemented` のまま。
+P2（`?acl/tagging/policy/cors/lifecycle/versioning/select` 等）は `501 NotImplemented` XML で返す。配置不可（quota / ノード不足）は `507 InsufficientStorage`。
+
+Nextcloud / Misskey は `forcePathStyle` / `requestChecksumCalculation` を含め `tests/e2e/s3compat` の in-process E2E（`sigv4.Signer` + `httptest`）で P0 全行程を PASS。`tests/e2e/nextcloud/misskey` は `docker-compose.yml` + `-tags=e2e_external` の 1 bucket 1 file smoke を `workflow_dispatch` で実行。置き場の決定（`single/dual/triple/ALL`）や 95% quota、再起動での中断復旧を備える。
 
 ## 設定 / Configuration
 
