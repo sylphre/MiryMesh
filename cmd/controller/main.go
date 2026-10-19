@@ -104,6 +104,9 @@ func main() {
 				_ = resolver.SetBucketPolicy(b, p)
 			}
 		}
+		// TODO(M10+): restore AuthIdentities — snapshot carries AccessKey presence list, new controller must re-seed
+		// secrets from config.Auth.Credentials or GUI key management. When GUI issues keys, wire authStore.Add here
+		// from adoptedSnapshot.AuthIdentities (presence check only; secrets remain out-of-band).
 	}
 	// TODO: GUI will manage bucket_policy at runtime; resolver.SetBucketPolicy is the wire point.
 	s3Router := s3api.NewRouterWithPlacement(store, cfg.Server.Region, resolver)

@@ -17,6 +17,7 @@ import (
 )
 
 // FanOut pushes the snapshot to each datanode's /internal/evacuate endpoint.
+// TODO(M10+): parallelize with errgroup.Group + per-node retry, and respect context cancellation.
 func (e *Evacuator) FanOut(snap *EvacuationSnapshot, addrs map[string]string, token string) map[string]error {
 	errs := make(map[string]error)
 	if snap == nil {

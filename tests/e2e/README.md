@@ -14,3 +14,20 @@ Layout:
 - `tests/e2e/s3compat/README.md` — sigv4.Signer helper vs external SDK guidance.
 
 CI: `.github/workflows/ci.yml` runs `tests/e2e/... -race` as a dedicated `e2e` job. Real external clients (awscli, Nextcloud/Misskey docker) will run as `e2e-external` with `if: github.event_name == 'schedule'` or manual `workflow_dispatch` to avoid slow inner loop.
+
+### Smoke with docker-compose (manual)
+```bash
+# Nextcloud smoke (1 bucket 1 file Put/Get via S3 path-style)
+docker compose -f tests/e2e/nextcloud/docker-compose.yml up --abort-on-container-exit &
+go test ./tests/e2e/nextcloud -tags=e2e_external -count=1 -run TestNextcloud_Smoke -v
+docker compose -f tests/e2e/nextcloud/docker-compose.yml down -v
+
+# Misskey smoke
+docker compose -f tests/e2e/misskey/docker-compose.yml up --abort-on-container-exit &
+go test ./tests/e2e/misskey -tags=e2e_external -count=1 -run TestMisskey_Smoke -v
+docker compose -f tests/e2e/misskey/docker-compose.yml down -v
+
+# awscli / s3cmd smoke (requires controller at :9000)
+go test ./tests/e2e/awscli -tags=e2e_external -count=1 -run TestAWSCLI_Smoke -v
+```
+Or trigger via GitHub Actions: `Actions → ci → Run workflow` (workflow_dispatch) — `schedule` also runs nightly `e2e-external` automatically.
