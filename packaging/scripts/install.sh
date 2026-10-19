@@ -2,31 +2,94 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
 # MiryMesh — LXC installer (no Docker required).
-# Usage:
+#
+# Master (controller) or Client/DataNodeを選んでインストールする簡易スクリプト。
+# - Master: S3 API (controller) を起動（datanode も同梱するが任意）
+# - Client: DataNode（storage node）として Master に登録して容量を提供
+#
+# Usage (対話式 — 引数なしで選択):
 #   curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash
-#   sudo bash packaging/scripts/install.sh [--deb|--rpm|--from-source] [--repo DIR]
+#   # → Master / Client を選択 → Master ならそのまま起動、Client なら Master の URL を入力
+#
+# Non-interactive:
+#   sudo bash packaging/scripts/install.sh --master [--deb|--rpm|--from-source] [--repo DIR]
+#   sudo bash packaging/scripts/install.sh --client --master-url http://master:9000 [--deb|--rpm|--from-source] [--repo DIR]
+#   # DEB/RPM は事前に nfpm でビルドした成果物が必要: packaging/README.md 参照
+#
+# Env overrides:
+#   MIRYMESH_MASTER_URL=http://master:9000  # Client で Master を指定
+#   MIRYMESH_ROLE=master|client             # 対話をスキップ
 set -eu
 
 MODE="from-source"
+ROLE=""
 REPO=""
+MASTER_URL="${MIRYMESH_MASTER_URL:-}"
+# Allow env override for role
+if [ -n "${MIRYMESH_ROLE:-}" ]; then
+  case "$MIRYMESH_ROLE" in
+    master|controller) ROLE="master" ;;
+    client|datanode|data) ROLE="client" ;;
+    *) echo "unknown MIRYMESH_ROLE=$MIRYMESH_ROLE (master|client)" >&2; exit 1 ;;
+  esac
+fi
+
 for arg in "$@"; do
   case "$arg" in
+    --master|--controller) ROLE="master" ;;
+    --client|--datanode|--data-node) ROLE="client" ;;
     --deb) MODE="deb" ;;
     --rpm) MODE="rpm" ;;
     --from-source|--source) MODE="from-source" ;;
+    --master-url=*) MASTER_URL="${arg#--master-url=}" ;;
+    --master-url) echo "usage: --master-url URL" >&2; exit 1 ;;
     --repo) echo "usage: --repo DIR" >&2; exit 1 ;;
     --repo=*) REPO="${arg#--repo=}" ;;
-    *) echo "unknown arg: $arg (expected --deb|--rpm|--from-source|--repo=DIR)" >&2; exit 1 ;;
+    --help|-h)
+      echo "usage: $0 [--master|--client] [--master-url URL] [--deb|--rpm|--from-source] [--repo DIR]"
+      echo "  --master   Install as Master (controller, S3 API)"
+      echo "  --client   Install as Client/DataNode (needs --master-url or MIRYMESH_MASTER_URL)"
+      echo "  No args    Interactive selection (Master / Client)"
+      exit 0
+      ;;
+    *) echo "unknown arg: $arg" >&2; echo "try: $0 --help" >&2; exit 1 ;;
   esac
 done
 
 log() { printf "[install] %s\n" "$*"; }
 die() { printf "error: %s\n" "$*" >&2; exit 1; }
 
-is_lxc() { grep -q "container=lxc" /proc/1/environ 2>/dev/null || [ -f /run/systemd/container ] && grep -q lxc /run/systemd/container 2>/dev/null || false; }
-if is_lxc; then log "LXC detected — native install (no Docker)"; else log "Not LXC — proceeding native install anyway (Docker not required)"; fi
+# Interactive selection if no role given
+if [ -z "$ROLE" ]; then
+  if [ -t 0 ] || [ -c /dev/tty ]; then
+    printf "MiryMesh role — 1) Master (controller, S3 API)  2) Client (DataNode)\n"
+    printf "Select [1/2] (default: 1): "
+    ans=""
+    if [ -c /dev/tty ]; then read -r ans < /dev/tty || true; else read -r ans || true; fi
+    case "$ans" in
+      2|client|datanode|c|C) ROLE="client" ;;
+      *) ROLE="master" ;;
+    esac
+  else
+    ROLE="master"
+    log "Non-interactive and no --master/--client — defaulting to Master. Use --client --master-url URL for DataNode."
+  fi
+fi
 
-# Resolve repo dir: if REPO given use it, else if we are inside a MiryMesh checkout use it, else clone to /tmp/mirymesh-src
+# For client, ensure master URL
+if [ "$ROLE" = "client" ] && [ -z "$MASTER_URL" ]; then
+  if [ -t 0 ] || [ -c /dev/tty ]; then
+    printf "Master URL (e.g. http://master:9000): "
+    if [ -c /dev/tty ]; then read -r MASTER_URL < /dev/tty || true; else read -r MASTER_URL || true; fi
+  fi
+  [ -n "$MASTER_URL" ] || die "Master URL required for Client/DataNode — pass --master-url http://master:9000 or set MIRYMESH_MASTER_URL"
+fi
+
+is_lxc() { grep -q "container=lxc" /proc/1/environ 2>/dev/null || ([ -f /run/systemd/container ] && grep -q lxc /run/systemd/container 2>/dev/null) || false; }
+if is_lxc; then log "LXC detected — native install (no Docker)"; else log "Not LXC — proceeding native install anyway (Docker not required)"; fi
+log "Role: $ROLE${MASTER_URL:+ (master: $MASTER_URL)}"
+
+# Resolve repo dir
 if [ -n "$REPO" ]; then
   SRC="$REPO"
 elif [ -f ./go.mod ] && [ -f ./packaging/nfpm.yaml ]; then
@@ -54,7 +117,6 @@ if ! id -u mirymesh >/dev/null 2>&1; then
     || useradd --system --gid mirymesh mirymesh || true
 fi
 
-# Build or install via package
 install_from_source() {
   if ! command -v go >/dev/null 2>&1; then
     die "go not found — install golang (apt: golang-go, dnf: golang) then rerun"
@@ -66,7 +128,6 @@ install_from_source() {
   install -m 0755 /tmp/mirymesh-controller /usr/local/bin/mirymesh-controller
   install -m 0755 /tmp/mirymesh-datanode   /usr/local/bin/mirymesh-datanode
   install -m 0755 /tmp/mirymesh            /usr/local/bin/mirymesh
-  # systemd units — prefer /usr/local/bin path for source installs
   if [ -f "$SRC/packaging/systemd/mirymesh-controller.service" ]; then
     sed 's|/usr/bin/mirymesh-controller|/usr/local/bin/mirymesh-controller|g' "$SRC/packaging/systemd/mirymesh-controller.service" > /etc/systemd/system/mirymesh-controller.service
     sed 's|/usr/bin/mirymesh-datanode|/usr/local/bin/mirymesh-datanode|g' "$SRC/packaging/systemd/mirymesh-datanode.service" > /etc/systemd/system/mirymesh-datanode.service
@@ -75,7 +136,6 @@ install_from_source() {
 }
 
 install_deb() {
-  # Expect a .deb built via: nfpm pkg --packager deb --config packaging/nfpm.yaml --target mirymesh.deb
   DEB=""
   for c in "$SRC/mirymesh.deb" ./mirymesh.deb /tmp/mirymesh.deb; do [ -f "$c" ] && DEB="$c" && break; done
   [ -n "$DEB" ] || die "mirymesh.deb not found — build first: nfpm pkg --packager deb --config packaging/nfpm.yaml --target mirymesh.deb"
@@ -104,18 +164,52 @@ chmod 0750 /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
 if [ ! -f /etc/mirymesh/config.yaml ] && [ -f "$SRC/packaging/config/config.yaml.example" ]; then
   cp "$SRC/packaging/config/config.yaml.example" /etc/mirymesh/config.yaml
   chmod 0600 /etc/mirymesh/config.yaml 2>/dev/null || true
-  log "Created /etc/mirymesh/config.yaml from example (0600) — edit before starting if needed"
+  log "Created /etc/mirymesh/config.yaml from example (0600)"
+  if [ "$ROLE" = "client" ] && [ -n "$MASTER_URL" ]; then
+    # Inject master URL into config for DataNode
+    if grep -q "controller_url:" /etc/mirymesh/config.yaml 2>/dev/null; then
+      sed -i "s|controller_url:.*|controller_url: \"$MASTER_URL\"|g" /etc/mirymesh/config.yaml
+    else
+      printf "\ndatanode:\n  controller_url: \"%s\"\n" "$MASTER_URL" >> /etc/mirymesh/config.yaml
+    fi
+    log "DataNode config: controller_url set to $MASTER_URL"
+  fi
 elif [ ! -f /etc/mirymesh/config.yaml ]; then
   log "No config at /etc/mirymesh/config.yaml — create one from packaging/config/config.yaml.example"
+else
+  if [ "$ROLE" = "client" ] && [ -n "$MASTER_URL" ]; then
+    if grep -q "controller_url:" /etc/mirymesh/config.yaml 2>/dev/null; then
+      sed -i "s|controller_url:.*|controller_url: \"$MASTER_URL\"|g" /etc/mirymesh/config.yaml
+    else
+      printf "\ndatanode:\n  controller_url: \"%s\"\n" "$MASTER_URL" >> /etc/mirymesh/config.yaml
+    fi
+    log "DataNode config: controller_url updated to $MASTER_URL"
+  fi
+fi
+
+# Edit hint
+if [ "$ROLE" = "client" ]; then
+  log "Client/DataNode: also set datanode.paths in /etc/mirymesh/config.yaml to your disk mounts (e.g. [\"/mnt/disk1\"])"
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload 2>/dev/null || true
-  log "To start: sudo systemctl enable --now mirymesh-controller  # and mirymesh-datanode on storage nodes"
-  log "Status:   systemctl status mirymesh-controller; journalctl -u mirymesh-controller -f"
-  log "Health:   curl -f http://127.0.0.1:9000/healthz"
+  if [ "$ROLE" = "master" ]; then
+    log "To start Master: sudo systemctl enable --now mirymesh-controller"
+    log "Status:   systemctl status mirymesh-controller; journalctl -u mirymesh-controller -f"
+    log "Health:   curl -f http://127.0.0.1:9000/healthz"
+    log "Admin GUI: http://127.0.0.1:9000/static/  or  http://127.0.0.1:9000/ (browser)"
+  else
+    log "To start Client: sudo systemctl enable --now mirymesh-datanode"
+    log "Status:   systemctl status mirymesh-datanode; journalctl -u mirymesh-datanode -f"
+    log "Check Master: curl http://127.0.0.1:9000/api/admin/nodes  # from Master host"
+  fi
 else
-  log "No systemctl — run directly: /usr/local/bin/mirymesh-controller /etc/mirymesh/config.yaml"
+  if [ "$ROLE" = "master" ]; then
+    log "No systemctl — run directly: /usr/local/bin/mirymesh-controller /etc/mirymesh/config.yaml"
+  else
+    log "No systemctl — run directly: /usr/local/bin/mirymesh-datanode /etc/mirymesh/config.yaml"
+  fi
 fi
 
-log "Done."
+log "Done ($ROLE)."

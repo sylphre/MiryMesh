@@ -44,19 +44,29 @@ curl -f http://127.0.0.1:9000/healthz   # ok
 ### 2) 簡単インストールスクリプト（LXC 推奨 / recommended for LXC）
 
 ```bash
-# One-liner install (LXC, no Docker) — builds from source or installs DEB/RPM
+# One-liner install (LXC, no Docker) — Master / Client を選択してインストール
+# 対話式: Master か Client を選べる（Client は Master の URL を聞かれる）
 curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash
-# or locally, after clone:
-sudo bash packaging/scripts/install.sh          # build from source
-sudo bash packaging/scripts/install.sh --deb    # or: use prebuilt DEB (needs nfpm-built artifact)
-sudo bash packaging/scripts/install.sh --rpm    # or: RPM
+# 対話なしで Master を入れる
+curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash -s -- --master
+# 対話なしで Client（DataNode）を入れる
+curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash -s -- --client --master-url http://master:9000
+
+# ローカルに clone 済みの場合
+sudo bash packaging/scripts/install.sh                 # 対話式で Master/Client 選択
+sudo bash packaging/scripts/install.sh --master        # Master として
+sudo bash packaging/scripts/install.sh --client --master-url http://master:9000  # Client として
+sudo bash packaging/scripts/install.sh --client --master-url http://master:9000 --deb  # DEB で Client
+sudo bash packaging/scripts/install.sh --help          # ヘルプ
 
 # then edit config and start
 sudoedit /etc/mirymesh/config.yaml
-sudo systemctl enable --now mirymesh-controller
+sudo systemctl enable --now mirymesh-controller   # Master
+# or: sudo systemctl enable --now mirymesh-datanode  # Client
 ```
 
 スクリプトは `preinstall.sh`/`postinstall.sh` と同様に `mirymesh:mirymesh` ユーザを作成し、`/var/lib/mirymesh` を用意します。
+Master では `mirymesh-controller` が S3 API を提供し、Client では `mirymesh-datanode` が Master に登録して容量を提供します。Client の `datanode.paths`（例: `["/mnt/disk1"]`）と `datanode.controller_url` はスクリプトが `--master-url` から自動設定します。
 
 ### 3) DEB/RPM から（任意 / via package）
 
