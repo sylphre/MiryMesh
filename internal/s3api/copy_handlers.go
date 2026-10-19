@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -48,7 +49,9 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 			return
 		}
 	}
-	// Read source data (M7 single-node; streaming TODO for larger)
+	// TODO(M8+): streaming CopyObject via io.Copy / PutObject stream to avoid
+	// holding up to 5GiB in memory (double copy + string cast). Replace
+	// ReadAll + string(data) with streaming path similar to multipart TODO.
 	data, err3 := io.ReadAll(rc)
 	if err3 != nil {
 		writeXMLError(w, r, 500, "InternalError", err3.Error())
@@ -94,7 +97,7 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 	// Use temp file style via storage's internal objectPath — mimic PutObject but avoid double read.
 	// Direct write:
 	destPath := rt.store.objectPath(destBucket, destKey)
-	if err := os.MkdirAll(getDir(destPath), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o750); err != nil {
 		writeXMLError(w, r, 500, "InternalError", err.Error())
 		return
 	}
@@ -104,7 +107,7 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 	if ct == "" {
 		ct = "application/octet-stream"
 	}
-	m, err4 := rt.store.PutObject(destBucket, destKey, ct, dstMeta, strings.NewReader(string(data)))
+	m, err4 := rt.store.PutObject(destBucket, destKey, ct, dstMeta, strings.NewReader(string(data))) // TODO: streaming, avoid string copy
 	if err4 != nil {
 		if apiErr, ok := err4.(APIError); ok {
 			writeError(w, r, apiErr)
@@ -164,11 +167,4 @@ func evalCopyConditions(w http.ResponseWriter, r *http.Request, srcMeta ObjectMe
 	return true
 }
 
-func getDir(p string) string {
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' {
-			return p[:i]
-		}
-	}
-	return "."
-}
+// getDir removed: use path/filepath.Dir.
