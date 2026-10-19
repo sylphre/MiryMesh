@@ -36,6 +36,7 @@ func main() {
 		cfg, err = config.Load(cfgPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "controller: load config: %v\n", err)
+			slog.Error("controller: load config failed — check ReadWritePaths includes /etc/mirymesh and file owner is mirymesh:mirymesh", "err", err)
 			os.Exit(1)
 		}
 	} else {

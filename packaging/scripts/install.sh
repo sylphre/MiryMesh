@@ -176,11 +176,15 @@ esac
 
 # Config seeding (0600, only if missing — same as postinstall.sh)
 mkdir -p /etc/mirymesh /var/lib/mirymesh /var/log/mirymesh
+chown mirymesh:mirymesh /etc/mirymesh 2>/dev/null || true
 chown mirymesh:mirymesh /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
-chmod 0750 /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
+chmod 0750 /etc/mirymesh /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
 if [ ! -f /etc/mirymesh/config.yaml ] && [ -f "$SRC/packaging/config/config.yaml.example" ]; then
   cp "$SRC/packaging/config/config.yaml.example" /etc/mirymesh/config.yaml
   chmod 0600 /etc/mirymesh/config.yaml 2>/dev/null || true
+  chown mirymesh:mirymesh /etc/mirymesh/config.yaml 2>/dev/null || chgrp mirymesh /etc/mirymesh/config.yaml 2>/dev/null || chmod 0644 /etc/mirymesh/config.yaml 2>/dev/null || true
+  chown mirymesh:mirymesh /etc/mirymesh 2>/dev/null || true
+  chown mirymesh:mirymesh /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
   log "Created /etc/mirymesh/config.yaml from example (0600)"
   if [ "${MASTER_GATEWAY:-no}" = "yes" ]; then
     if grep -q "^  mode:" /etc/mirymesh/config.yaml 2>/dev/null; then
