@@ -126,7 +126,19 @@ P0（Nextcloud / Misskey が実利用する最小セット）は全て実装済�
 P1 は `UploadPartCopy` を含めほぼ完了。`GetObjectAttributes` は P2 として `501 NotImplemented` のまま。
 P2（`?acl/tagging/policy/cors/lifecycle/versioning/select` 等）は `501 NotImplemented` XML で返す。配置不可（quota / ノード不足）は `507 InsufficientStorage`。
 
-Nextcloud / Misskey は `forcePathStyle` / `requestChecksumCalculation` を含め `tests/e2e/s3compat` の in-process E2E（`sigv4.Signer` + `httptest`）で P0 全行程を PASS。`tests/e2e/nextcloud/misskey` は `docker-compose.yml` + `-tags=e2e_external` の 1 bucket 1 file smoke を `workflow_dispatch` で実行。置き場の決定（`single/dual/triple/ALL`）や 95% quota、再起動での中断復旧を備える。
+Nextcloud / Misskey は `forcePathStyle` / `requestChecksumCalculation` を含め `tests/e2e/s3compat` の in-process E2E（`sigv4.Signer` + `httptest`）で P0 全行程を PASS。`tests/e2e/nextcloud/misskey` は `docker-compose.yml` + `-tags=e2e_external` の 1 bucket 1 file smoke を `workflow_dispatch` で実行。
+
+## MiryMesh 独自機能 / Extensions
+
+P0 と `2006-03-01` は S3 互換の核だが、MiryMesh 固有の配置・容量・Gateway を GUI から操作できる。
+
+- **配置ポリシー** — `single(1)/dual(2)/triple(3)/ALL(全ノード)` を `disks/bucket/object` 単位で選択。`GUI→Disks/Buckets` と将来の `PUT ?policy` 拡張で指定。`placement.Engine.Select` が `online + 95% quota` を見て `weighted random` で決定し、配置不可は `507 InsufficientStorage`。 → [`packaging/config/config.yaml.example`](packaging/config/config.yaml.example)
+- **パス別クォータ** — 各 DataNode の `/mnt/diskX` ごとに `Limit`（デフォ物理容量の `95%`、`EffectiveLimit/EffectiveAvail`）を GUI で設定。足したディスクをそのまま上限付きで束ねられる。 → `web/static/disks.html` / [`packaging/config/config.yaml.example`](packaging/config/config.yaml.example)
+- **Gateway モード** — `server.mode: gateway`（`storage.gateway: true`）でマスターに S3 実体を置かず、S3 実体は DataNode のみに保存。マスターには `bucket` 存在と `setup.json`（`AccessKey/AdminToken/DefaultPolicy`）のメタデータのみ残る。`install.sh --master` の `gateway? [y/N]` と `web/static/settings.html` の `Mode` 表示で切り替え。`RemoteStore` が DataNode の `/internal/objects/*` へ fan-out / failover（`single` は1ノード、`ALL` は全ノード、`dual/triple` は `placement` で複数ノードへ）。 → [`packaging/config/config.yaml.example`](packaging/config/config.yaml.example) / [`web/static/setup.html`](web/static/setup.html)
+- **Evacuation / Adoption** — `EvacuationSnapshot{Buckets/Objects/PlacementPolicies/AuthIdentities}` を `Evacuator.Save → FanOut POST /internal/evacuate` で各 DataNode へ配布。新マスターは `LoadAny(MIRYMESH_EVAC_DIR, MIRYMESH_REMOTE_EVAC_DIRS)` → `Restorer.Restore` で引き継ぎ。`AuthIdentities` は存在確認のみ（secrets は非退避）。 → [`web/static/setup.html`](web/static/setup.html) / [`packaging/config/config.yaml.example`](packaging/config/config.yaml.example)
+- **管理 GUI / Admin API** — 素の `HTML/CSS/JS`（4層 `tokens/base/layout/components`、BEM）の Dashboard / Nodes / Disks / Buckets / Jobs / Settings + `GET/POST /api/admin/*`。Admin はデフォ `:9001` で S3 の `:9000` と分離し、`X-Admin-Token` + Tailscale / `127.0.0.1` での閉域を [`SECURITY.md`](SECURITY.md) で推奨。 → [`web/static/index.html`](web/static/index.html) / [`packaging/README.md`](packaging/README.md)
+
+> 互換性注意: `507 InsufficientStorage` と `ObjectStore`/`gateway` は MiryMesh 独自。`?acl/tagging/policy/cors/lifecycle/versioning/select` は `501 NotImplemented` で返す。
 
 ## 設定 / Configuration
 
