@@ -145,6 +145,8 @@ install_from_source() {
   install -m 0755 /tmp/mirymesh-controller /usr/local/bin/mirymesh-controller
   install -m 0755 /tmp/mirymesh-datanode   /usr/local/bin/mirymesh-datanode
   install -m 0755 /tmp/mirymesh            /usr/local/bin/mirymesh
+  mkdir -p /usr/share/mirymesh; rm -rf /usr/share/mirymesh/static
+  cp -a "$SRC/web/static" /usr/share/mirymesh/static
   if [ -f "$SRC/packaging/systemd/mirymesh-controller.service" ]; then
     sed 's|/usr/bin/mirymesh-controller|/usr/local/bin/mirymesh-controller|g' "$SRC/packaging/systemd/mirymesh-controller.service" > /etc/systemd/system/mirymesh-controller.service
     sed 's|/usr/bin/mirymesh-datanode|/usr/local/bin/mirymesh-datanode|g' "$SRC/packaging/systemd/mirymesh-datanode.service" > /etc/systemd/system/mirymesh-datanode.service

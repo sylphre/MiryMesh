@@ -99,6 +99,12 @@ jobs:
         run: go build -trimpath -o /tmp/mirymesh-controller ./cmd/controller && go build -trimpath -o /tmp/mirymesh-datanode ./cmd/datanode && go build -trimpath -o /tmp/mirymesh ./cmd/mirymesh && ls -lh /tmp/mirymesh*
       - name: docker build (no push)
         run: docker build -f packaging/docker/Dockerfile -t mirymesh:ci .
+      - name: smoke — /static/setup.html on admin 9001
+        run: |
+          docker run -d -p 19001:9001 --name mirymesh-smoke mirymesh:ci
+          for i in $(seq 1 15); do curl -sf http://127.0.0.1:19001/static/setup.html | grep -q MiryMesh && break; sleep 1; done
+          curl -sf http://127.0.0.1:19001/static/setup.html | grep -q MiryMesh
+          docker rm -f mirymesh-smoke
       - name: nfpm --dry-run (deb/rpm) + goreleaser check
         run: |
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest

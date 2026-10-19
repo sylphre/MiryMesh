@@ -14,5 +14,7 @@ FROM gcr.io/distroless/static-debian12
 COPY --from=build /out/mirymesh-controller /usr/bin/mirymesh-controller
 COPY --from=build /out/mirymesh-datanode /usr/bin/mirymesh-datanode
 COPY --from=build /out/mirymesh /usr/bin/mirymesh
+COPY web/static /usr/share/mirymesh/static
 EXPOSE 9000
+EXPOSE 9001
 ENTRYPOINT ["/usr/bin/mirymesh-controller"]
