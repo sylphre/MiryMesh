@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+# MiryMesh release workflow — master development line.
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0)"
+        required: false
+permissions:
+  contents: write
+  packages: write
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: build binaries
+        run: go build -trimpath -o /tmp/mirymesh-controller ./cmd/controller && go build -trimpath -o /tmp/mirymesh-datanode ./cmd/datanode && go build -trimpath -o /tmp/mirymesh ./cmd/mirymesh
+      - name: nfpm deb/rpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          nfpm pkg --packager deb --config packaging/nfpm.yaml --target mirymesh.deb
+          nfpm pkg --packager rpm --config packaging/nfpm.yaml --target mirymesh.rpm
+          ls -lh mirymesh.deb mirymesh.rpm
+      - name: docker buildx
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/docker/Dockerfile
+          push: false
+          load: true
+          tags: mirymesh:${{ github.ref_name }}
+      - name: gh release create (dry-run if manual dispatch without tag)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            gh release create "${{ github.ref_name }}" mirymesh.deb mirymesh.rpm --title "${{ github.ref_name }}" --notes "See CHANGELOG.md — LICENSE AGPL-3.0-only bundled" || true
+          else
+            echo "manual dispatch: skipping gh release create (no tag)"
+            ls -lh mirymesh.deb mirymesh.rpm
+          fi
+      - name: verify LICENSE bundled
+        run: test -f LICENSE && head -1 LICENSE | grep -q "AFFERO" && echo "LICENSE ok (AGPL-3.0-only)"

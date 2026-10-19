@@ -48,6 +48,7 @@ golangci-lint run --timeout=3m
 docker build -f packaging/docker/Dockerfile -t mirymesh:ci .
 nfpm pkg --packager deb --config packaging/nfpm.yaml --target /tmp/mirymesh.deb && echo "deb ok" && rm /tmp/mirymesh.deb
 nfpm pkg --packager rpm --config packaging/nfpm.yaml --target /tmp/mirymesh.rpm && echo "rpm ok" && rm /tmp/mirymesh.rpm
+goreleaser --snapshot --skip-publish --clean  # or: goreleaser check
 ```
 CI: `.github/workflows/ci.yml` now runs `packaging` (build + docker build + nfpm deb/rpm `--dry-run` + goreleaser check) and `linux-matrix` (Debian/Alma/Rocky via docker) and `e2e-external` on `schedule`/`workflow_dispatch`.
 

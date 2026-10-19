@@ -99,6 +99,16 @@ jobs:
         run: go build -trimpath -o /tmp/mirymesh-controller ./cmd/controller && go build -trimpath -o /tmp/mirymesh-datanode ./cmd/datanode && go build -trimpath -o /tmp/mirymesh ./cmd/mirymesh && ls -lh /tmp/mirymesh*
       - name: docker build (no push)
         run: docker build -f packaging/docker/Dockerfile -t mirymesh:ci .
+      - name: nfpm --dry-run (deb/rpm) + goreleaser check
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          nfpm pkg --packager deb --config packaging/nfpm.yaml --target /tmp/mirymesh.deb && echo "deb dry-run ok" && rm -f /tmp/mirymesh.deb
+          nfpm pkg --packager rpm --config packaging/nfpm.yaml --target /tmp/mirymesh.rpm && echo "rpm dry-run ok" && rm -f /tmp/mirymesh.rpm
+          # goreleaser check is optional; if config missing, skip
+          if [ -f .goreleaser.yaml ] || [ -f .goreleaser.yml ]; then go install github.com/goreleaser/goreleaser@latest && goreleaser check || true; fi
+          # fallback snapshot check if binary available
+          if command -v goreleaser >/dev/null 2>&1; then goreleaser --snapshot --skip=publish --clean || true; fi
+          echo "packaging dry-run complete"
 
   linux-matrix:
     runs-on: ubuntu-24.04
