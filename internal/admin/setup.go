@@ -5,24 +5,35 @@ package admin
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/sylphre/MiryMesh/internal/placement"
+	"golang.org/x/crypto/argon2"
 )
 
 // SetupState holds the persisted setup state (MVP: /var/lib/mirymesh/setup.json).
 type SetupState struct {
-	Initialized   bool   `json:"initialized"`
-	AccessKey     string `json:"access_key"`
-	SecretKey     string `json:"secret_key"`
-	AdminToken    string `json:"admin_token"`
-	DefaultPolicy string `json:"default_policy"`
+	Initialized       bool   `json:"initialized"`
+	AdminUsername     string `json:"admin_username"`
+	AdminPasswordHash string `json:"admin_password_hash"` // argon2id$<salt-hex>$<hash-hex>$time=1,memory=65536,threads=4
+	AccessKey         string `json:"access_key"`
+	SecretKey         string `json:"secret_key"`
+	AdminToken        string `json:"admin_token"`
+	DefaultPolicy     string `json:"default_policy"`
+	DBDriver          string `json:"db_driver,omitempty"`
+	DBDSN             string `json:"db_dsn,omitempty"`
+	Region            string `json:"region,omitempty"`
+	Gateway           bool   `json:"gateway,omitempty"`
+	DatanodePaths     string `json:"datanode_paths,omitempty"` // comma-separated
 }
 
 // SetupStore manages setup persistence.
@@ -148,6 +159,55 @@ func validateSetupInput(accessKey, secretKey, policy string) error {
 	return nil
 }
 
+func hashPasswordArgon2id(password string) (string, error) {
+	if password == "" {
+		return "", errInvalidSecret
+	}
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	hash := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
+	return fmt.Sprintf("argon2id$%s$%s$t=1,m=65536,p=4", hex.EncodeToString(salt), hex.EncodeToString(hash)), nil
+}
+
+func verifyPasswordArgon2id(password, stored string) bool {
+	// stored format: argon2id$<salt-hex>$<hash-hex>$t=1,m=65536,p=4  or legacy argon2id$<salt>$<hash>
+	parts := strings.Split(stored, "$")
+	if len(parts) < 3 {
+		return false
+	}
+	saltHex := parts[1]
+	hashHex := parts[2]
+	salt, err := hex.DecodeString(saltHex)
+	if err != nil {
+		return false
+	}
+	expected, err := hex.DecodeString(hashHex)
+	if err != nil {
+		return false
+	}
+	got := argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, 32)
+	return subtle.ConstantTimeCompare(got, expected) == 1
+}
+
+// generateRandomCredential creates a 20-char alphanumeric AccessKey and 32-char SecretKey via crypto/rand.
+func generateRandomCredential() (string, string) {
+	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 20)
+	_, _ = rand.Read(b)
+	for i := range b {
+		b[i] = letters[int(b[i])%len(letters)]
+	}
+	sb := make([]byte, 32)
+	_, _ = rand.Read(sb)
+	// base64-like but hex for simplicity
+	secret := hex.EncodeToString(sb)[:32]
+	return string(b), secret
+}
+
+var _ = strconv.Itoa // keep import
+
 var (
 	errAlreadyInitialized = &apiError{Code: 403, Msg: "already initialized"}
 	errInvalidAccessKey   = &apiError{Code: 400, Msg: "access_key must be 3-128 chars"}
@@ -164,6 +224,8 @@ func (e *apiError) Error() string { return e.Msg }
 func (h *Handler) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/setup", h.handleSetup)
 	mux.HandleFunc("/api/admin/setup/status", h.handleSetupStatus)
+	mux.HandleFunc("/api/admin/login", h.handleLogin)
+	mux.HandleFunc("/api/admin/generate-credentials", h.handleGenerateCredentials)
 }
 
 func (h *Handler) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
@@ -193,12 +255,27 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var req struct {
+			Username      string `json:"username"`
+			Password      string `json:"password"`
 			AccessKey     string `json:"access_key"`
 			SecretKey     string `json:"secret_key"`
 			DefaultPolicy string `json:"default_policy"`
+			Region        string `json:"region"`
+			Gateway       bool   `json:"gateway"`
+			DatanodePaths string `json:"datanode_paths"`
+			DBDriver      string `json:"db_driver"`
+			DBDSN         string `json:"db_dsn"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.Username) == "" || len(req.Username) < 3 || len(req.Username) > 64 {
+			http.Error(w, "username must be 3-64 chars", http.StatusBadRequest)
+			return
+		}
+		if len(req.Password) < 8 {
+			http.Error(w, "password must be at least 8 chars", http.StatusBadRequest)
 			return
 		}
 		if err := validateSetupInput(req.AccessKey, req.SecretKey, req.DefaultPolicy); err != nil {
@@ -209,13 +286,25 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		if policy == "" {
 			policy = "single"
 		}
+		hash, err := hashPasswordArgon2id(req.Password)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		token := generateToken()
 		st := &SetupState{
-			Initialized:   true,
-			AccessKey:     strings.TrimSpace(req.AccessKey),
-			SecretKey:     req.SecretKey,
-			AdminToken:    token,
-			DefaultPolicy: strings.ToLower(policy),
+			Initialized:       true,
+			AdminUsername:     strings.TrimSpace(req.Username),
+			AdminPasswordHash: hash,
+			AccessKey:         strings.TrimSpace(req.AccessKey),
+			SecretKey:         req.SecretKey,
+			AdminToken:        token,
+			DefaultPolicy:     strings.ToLower(policy),
+			Region:            req.Region,
+			Gateway:           req.Gateway,
+			DatanodePaths:     req.DatanodePaths,
+			DBDriver:          req.DBDriver,
+			DBDSN:             req.DBDSN,
 		}
 		if err := h.setupStore.Save(st); err != nil {
 			if err == errAlreadyInitialized {
@@ -248,4 +337,44 @@ func asStatus(err error) int {
 		return e.Code
 	}
 	return 400
+}
+
+func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if h.setupStore == nil {
+		http.Error(w, "setup not configured", http.StatusInternalServerError)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !h.setupStore.IsInitialized() {
+		http.Error(w, "not initialized", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	st := h.setupStore.Get()
+	if st == nil || st.AdminUsername != strings.TrimSpace(req.Username) || !verifyPasswordArgon2id(req.Password, st.AdminPasswordHash) {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"admin_token": st.AdminToken})
+}
+
+func (h *Handler) handleGenerateCredentials(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ak, sk := generateRandomCredential()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"access_key": ak, "secret_key": sk})
 }

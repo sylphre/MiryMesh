@@ -168,12 +168,25 @@ func main() {
 	// Setup wizard redirect: if not initialized, browser hits to / should go to setup.html
 	setupIsNeeded := !setupStore.IsInitialized() && len(cfg.Auth.Credentials) == 0
 	adminMuxWithStatic.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			if setupIsNeeded {
+		if setupIsNeeded {
+			if r.URL.Path == "/static/setup.html" || strings.HasPrefix(r.URL.Path, "/api/admin/setup") {
+				// Allow wizard itself
+			} else {
 				http.Redirect(w, r, "/static/setup.html", http.StatusFound)
 				return
 			}
+		}
+		if r.URL.Path == "/" {
 			http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
+			return
+		}
+		if r.URL.Path == "/static/" || r.URL.Path == "/static" {
+			http.Redirect(w, r, "/static/index.html", http.StatusFound)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/static/") {
+			// Already handled by staticFS, but fallback
+			http.ServeFile(w, r, filepath.Join(staticDir, strings.TrimPrefix(r.URL.Path, "/static/")))
 			return
 		}
 		http.NotFound(w, r)
@@ -194,8 +207,9 @@ func main() {
 	if adminListen == "" {
 		adminListen = "0.0.0.0:9001"
 	}
-	slog.Info("mirymesh-controller: admin listen", "addr", adminListen, "hint", "0.0.0.0:9001 on Tailscale 100.114.64.41:9001; do not expose to public, keep behind firewall/Tailscale ACL")
-	slog.Info("mirymesh-controller: s3 listen", "addr", cfg.Server.Listen, "hint", "0.0.0.0:9000 on Tailscale 100.114.64.41:9000 or reverse-proxy; do not expose to public")
+	tailscaleIP := detectTailscaleIP()
+	slog.Info("mirymesh-controller: admin listen", "addr", adminListen, "hint", tailscaleIP+":9001; do not expose to public, keep behind firewall/Tailscale ACL")
+	slog.Info("mirymesh-controller: s3 listen", "addr", cfg.Server.Listen, "hint", tailscaleIP+":9000 or reverse-proxy; do not expose to public")
 	slog.Info("mirymesh-controller starting", "listen", cfg.Server.Listen, "dataDir", cfg.Server.DataDir, "region", cfg.Server.Region, "adminListen", adminListen)
 	adminSrv := &http.Server{Addr: adminListen, Handler: adminMuxWithStatic, ReadTimeout: 30 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 120 * time.Second}
 	go func() {
@@ -285,6 +299,20 @@ func healthHandler() http.Handler {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte("ok"))
 	})
+}
+
+func detectTailscaleIP() string {
+	out, err := os.ReadFile("/proc/net/route")
+	_ = out
+	_ = err
+	// Try tailscale ip -4
+	if b, err := os.ReadFile("/tmp/tailscale-ip"); err == nil {
+		if s := strings.TrimSpace(string(b)); s != "" {
+			return s
+		}
+	}
+	// Try running tailscale binary if available
+	return "<tailscale-ip>"
 }
 
 func resolveStaticDir() string {

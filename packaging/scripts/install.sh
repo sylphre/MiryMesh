@@ -45,6 +45,7 @@ for arg in "$@"; do
     --master-url) echo "usage: --master-url URL" >&2; exit 1 ;;
     --repo) echo "usage: --repo DIR" >&2; exit 1 ;;
     --repo=*) REPO="${arg#--repo=}" ;;
+    --no-enable) NO_ENABLE=1 ;;
     --help|-h)
       echo "usage: $0 [--master|--client] [--master-url URL] [--deb|--rpm|--from-source] [--repo DIR]"
       echo "  --master   Install as Master (controller, S3 API)"
@@ -176,6 +177,61 @@ case "$MODE" in
   rpm)         install_rpm ;;
 esac
 
+# DB check (Master only) — PostgreSQL or MySQL/MariaDB required
+if [ "$ROLE" = "master" ] && [ "${SKIP_DB_CHECK:-}" != "1" ]; then
+  _skip=false
+  for a in "$@"; do [ "$a" = "--skip-db-check" ] && _skip=true; done
+  if [ "$_skip" = "true" ] || [ "${MIRYMESH_SKIP_DB_CHECK:-}" = "1" ]; then
+    log "DB check skipped (--skip-db-check)"
+  else
+    has_pg=false; has_mysql=false
+    command -v psql >/dev/null 2>&1 && has_pg=true
+    command -v mysql >/dev/null 2>&1 && has_mysql=true
+    command -v mariadb >/dev/null 2>&1 && has_mysql=true
+    if [ "$has_pg" = "false" ] && [ "$has_mysql" = "false" ]; then
+      echo "[install] PostgreSQL or MySQL/MariaDB is required — install one then rerun (apt: postgresql, dnf: postgresql-server / mariadb-server)" >&2
+      echo "       or: $0 --skip-db-check  to skip this check" >&2
+      exit 1
+    fi
+    # Auto-create DB if possible (interactive or env)
+    db_user="${MIRYMESH_DB_USER:-}"; db_pass="${MIRYMESH_DB_PASSWORD:-}"; db_name="${MIRYMESH_DB_NAME:-}"; db_driver="${MIRYMESH_DB_DRIVER:-}"
+    for a in "$@"; do case "$a" in --db-user=*) db_user="${a#--db-user=}";; --db-password=*) db_pass="${a#--db-password=}";; --db-name=*) db_name="${a#--db-name=}";; --db-driver=*) db_driver="${a#--db-driver=}";; esac; done
+    if [ -t 0 ] || [ -c /dev/tty ]; then
+      # Interactive prompts for DB
+      if [ -z "$db_user" ]; then printf "DB user [mirymesh]: "; if [ -c /dev/tty ]; then read -r tmp < /dev/tty || true; else read -r tmp || true; fi; db_user="${tmp:-mirymesh}"; fi
+      if [ -z "$db_pass" ]; then db_pass="$(openssl rand -hex 12 2>/dev/null || head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"; log "Generated DB password (will be shown once): $db_pass"; fi
+      if [ -z "$db_name" ]; then printf "DB name [mirymesh]: "; if [ -c /dev/tty ]; then read -r tmp < /dev/tty || true; else read -r tmp || true; fi; db_name="${tmp:-mirymesh}"; fi
+      if [ -z "$db_driver" ]; then printf "Driver [postgres]: "; if [ -c /dev/tty ]; then read -r tmp < /dev/tty || true; else read -r tmp || true; fi; db_driver="${tmp:-postgres}"; fi
+    else
+      db_user="${db_user:-mirymesh}"; db_name="${db_name:-mirymesh}"; db_driver="${db_driver:-postgres}"
+      if [ -z "$db_pass" ]; then db_pass="$(openssl rand -hex 12 2>/dev/null || echo mirymeshtmp)"; fi
+    fi
+    # Try to create DB
+    if [ "$db_driver" = "postgres" ] || [ "$db_driver" = "postgresql" ]; then
+      if [ "$has_pg" = "true" ]; then
+        sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='$db_name'" 2>/dev/null | grep -q 1 || sudo -u postgres psql -c "CREATE USER $db_user WITH PASSWORD '$db_pass'; CREATE DATABASE $db_name OWNER $db_user;" 2>/dev/null || log "PostgreSQL create skipped (needs sudo -u postgres or existing DB)"
+        log "PostgreSQL DSN will be postgres://$db_user:***@127.0.0.1:5432/$db_name?sslmode=disable"
+        # Save to config later and to setup.json via admin API
+        DB_DSN="postgres://$db_user:$db_pass@127.0.0.1:5432/$db_name?sslmode=disable"
+        export DB_DSN
+        echo "DSN password: $db_pass (save it!)"
+      fi
+    elif [ "$db_driver" = "mysql" ] || [ "$db_driver" = "mariadb" ]; then
+      if [ "$has_mysql" = "true" ]; then
+        mysql -u root -e "CREATE DATABASE IF NOT EXISTS $db_name; CREATE USER IF NOT EXISTS '$db_user'@'localhost' IDENTIFIED BY '$db_pass'; GRANT ALL ON $db_name.* TO '$db_user'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null || log "MySQL create: try mysql -u root -p then rerun or use --skip-db-check"
+        DB_DSN="$db_user:$db_pass@tcp(127.0.0.1:3306)/$db_name"
+        export DB_DSN
+        echo "DSN password: $db_pass"
+      fi
+    fi
+    # Write DB to config if we have DSN
+    if [ -n "${DB_DSN:-}" ] && [ -f /etc/mirymesh/config.yaml ]; then
+      # Will be written after config seeding below
+      :
+    fi
+  fi
+fi
+
 # Config seeding (0600, only if missing — same as postinstall.sh)
 mkdir -p /etc/mirymesh /var/lib/mirymesh /var/log/mirymesh
 chown mirymesh:mirymesh /etc/mirymesh 2>/dev/null || true
@@ -188,6 +244,17 @@ if [ ! -f /etc/mirymesh/config.yaml ] && [ -f "$SRC/packaging/config/config.yaml
   chown mirymesh:mirymesh /etc/mirymesh 2>/dev/null || true
   chown mirymesh:mirymesh /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
   log "Created /etc/mirymesh/config.yaml from example (0600)"
+  if [ -n "${DB_DSN:-}" ]; then
+    driver="${db_driver:-postgres}"
+    # Write db section
+    if grep -q "^db:" /etc/mirymesh/config.yaml 2>/dev/null; then
+      # Replace existing db block naively: remove old driver/dsn lines then append
+      sed -i "/^db:/,/^[^ ]/ { /driver:/d; /dsn:/d; }" /etc/mirymesh/config.yaml 2>/dev/null || true
+      # Append under db:
+      awk -v drv="$driver" -v dsn="$DB_DSN" 'BEGIN{p=0} /^db:/{print; print "  driver: \"" drv "\""; print "  dsn: \"" dsn "\""; p=1; next} p && /^[^ ]/{p=0} !p' /etc/mirymesh/config.yaml > /tmp/mirymesh-config.tmp 2>/dev/null && cat /tmp/mirymesh-config.tmp > /etc/mirymesh/config.yaml 2>/dev/null || true
+      log "Wrote db.driver/dsn to /etc/mirymesh/config.yaml"
+    fi
+  fi
   if [ "${MASTER_GATEWAY:-no}" = "yes" ]; then
     if grep -q "^  mode:" /etc/mirymesh/config.yaml 2>/dev/null; then
       sed -i "s/^  mode:.*/  mode: gateway/" /etc/mirymesh/config.yaml
@@ -225,6 +292,11 @@ fi
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload 2>/dev/null || true
+  if [ "${NO_ENABLE:-}" != "1" ]; then
+    if [ "$ROLE" = "master" ]; then sudo systemctl enable --now mirymesh-controller 2>/dev/null || true; log "Auto-enabled mirymesh-controller"; else sudo systemctl enable --now mirymesh-datanode 2>/dev/null || true; log "Auto-enabled mirymesh-datanode"; fi
+    sleep 2
+    if curl -sf http://127.0.0.1:9001/api/admin/setup/status >/dev/null 2>&1; then log "Controller up (9001/setup/status ok)"; else log "Controller not yet up — check journalctl -u mirymesh-controller -n 20"; journalctl -u mirymesh-controller -n 20 2>/dev/null | head -20 || true; fi
+  fi
   if [ "$ROLE" = "master" ]; then
     log "To start Master: sudo systemctl enable --now mirymesh-controller && xdg-open http://127.0.0.1:9000/  # setup redirects to http://127.0.0.1:9001/static/setup.html (S3 0.0.0.0:9000 / Admin 0.0.0.0:9001, Tailscale 100.114.64.41:900x, firewall/Tailscale ACL required)"
     log "Setup:    Master 初回はブラウザで http://100.114.64.41:9001/static/setup.html または http://127.0.0.1:9001/static/setup.html で AccessKey/Secret/Policy を入力 (Token は localStorage に保存, 0.0.0.0:9001 は public に晒さない)"

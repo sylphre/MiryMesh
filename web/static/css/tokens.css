@@ -2,19 +2,19 @@
 /* Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. */
 /* Tokens only: :root. No resets, no element selectors. */
 :root {
-  --color-bg: #fafaf9;
-  --color-fg: #1c1917;
-  --color-muted: #78716c;
-  --color-border: #e7e5e4;
-  --color-surface: #ffffff;
-  --color-soft: #e7e5e4;
-  --color-primary: #0c4a6e;
-  --color-primary-contrast: #f8fafc;
-  --color-success: #14532d;
-  --color-success-bg: #dcfce7;
-  --color-warning: #7c2d12;
-  --color-error: #991b1b;
-  --color-error-bg: #fee2e2;
+  --color-bg: #0a0a0a;
+  --color-fg: #f5f5f5;
+  --color-muted: #9a9a9a;
+  --color-border: #2a2a2a;
+  --color-surface: #1a1a1a;
+  --color-soft: #2a2a2a;
+  --color-primary: #38bdf8;
+  --color-primary-contrast: #0a0a0a;
+  --color-success: #4ade80;
+  --color-success-bg: #14532d;
+  --color-warning: #fb923c;
+  --color-error: #f87171;
+  --color-error-bg: #450a0a;
   --radius: 8px;
   --radius-pill: 999px;
   --space-xs: 4px;
