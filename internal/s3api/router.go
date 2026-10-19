@@ -116,8 +116,12 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Object-level operations: /{bucket}/{key}
 	if !isBucketOp || key != "" {
-		// Multipart dispatch
-		if q.Has("uploadId") && q.Has("partNumber") && r.Method == http.MethodPut {
+		// Multipart + UploadPartCopy dispatch: PUT with uploadId+partNumber
+		if r.Method == http.MethodPut && q.Has("uploadId") && q.Has("partNumber") {
+			if r.Header.Get("X-Amz-Copy-Source") != "" || r.Header.Get("x-amz-copy-source") != "" {
+				rt.handleUploadPartCopy(w, r, bucket, key)
+				return
+			}
 			rt.handleUploadPart(w, r, bucket, key)
 			return
 		}
@@ -146,11 +150,6 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		case http.MethodPut:
 			if r.Header.Get("X-Amz-Copy-Source") != "" || r.Header.Get("x-amz-copy-source") != "" {
-				// UploadPartCopy (PUT with uploadId+partNumber+copy-source) stays 501 in M7.
-				if q.Has("uploadId") && q.Has("partNumber") {
-					writeError(w, r, errNotImplemented)
-					return
-				}
 				rt.handleCopyObject(w, r, bucket, key)
 				return
 			}

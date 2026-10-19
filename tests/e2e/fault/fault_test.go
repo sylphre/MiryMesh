@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,5 +75,26 @@ func TestFault_ControllerRestart_Resume(t *testing.T) {
 	s3api.AuthMiddleware(astore, router2).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK || rr.Body.String() != string(body) {
 		t.Fatalf("after restart Get %d %q", rr.Code, rr.Body.String())
+	}
+}
+
+func TestFault_DiskError_Quota(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := s3api.NewStorage(dir)
+	_ = st.CreateBucket("bkt")
+	_ = st.IsOverQuota(1 << 30)
+	_ = st.FilesystemCapacity()
+}
+
+func TestFault_InterruptedWrite_Retries(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := s3api.NewStorage(dir)
+	_ = st.CreateBucket("bkt")
+	_, _ = st.PutObject("bkt", "k", "text/plain", nil, strings.NewReader("final"))
+	meta, rc, _ := st.GetObject("bkt", "k")
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(data) != "final" || meta.Size != 5 {
+		t.Fatalf("interrupted write recovery failed")
 	}
 }
