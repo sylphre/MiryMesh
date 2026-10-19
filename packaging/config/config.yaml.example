@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+# MiryMesh config example — /etc/mirymesh/config.yaml
+server:
+  listen: ":9000"
+  region: "us-east-1"
+  data_dir: "/var/lib/mirymesh"
+auth:
+  credentials:
+    - access_key: "TESTKEY"
+      secret_key: "testsecret12345"
+storage:
+  default_policy: "single"
+datanode:
+  controller_url: "http://127.0.0.1:9000"
+  paths: ["/mnt/mirymesh/disk1"]
+log:
+  level: "info"

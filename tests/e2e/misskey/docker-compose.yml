@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+services:
+  controller:
+    build:
+      context: ../../..
+      dockerfile: packaging/docker/Dockerfile
+    container_name: mirymesh-controller-e2e
+    ports: ["9000:9000"]
+    volumes:
+      - mirymesh-data:/var/lib/mirymesh
+  misskey:
+    image: misskey/misskey:latest
+    depends_on: [controller]
+    environment:
+      MISSKEY_S3_BUCKET: e2e-misskey
+      MISSKEY_S3_KEY: TESTKEY
+      MISSKEY_S3_SECRET: testsecret12345
+      MISSKEY_S3_HOST: controller:9000
+      MISSKEY_S3_FORCE_PATH_STYLE: "true"
+    ports: ["3000:3000"]
+volumes:
+  mirymesh-data:

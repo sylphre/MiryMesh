@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sylphre/MiryMesh/internal/admin"
+	"github.com/sylphre/MiryMesh/internal/metadata"
 	"github.com/sylphre/MiryMesh/internal/replication"
 
 	"github.com/sylphre/MiryMesh/internal/auth"
@@ -48,6 +50,38 @@ func main() {
 		fmt.Fprintf(os.Stderr, "controller: init storage: %v\n", err)
 		os.Exit(1)
 	}
+	// Adoption mode: load snapshot early to restore storage, then restore placement after resolver
+	var adoptedSnapshot *metadata.EvacuationSnapshot
+	// Adoption mode: try to load latest evacuation snapshot from local + datanode remote dirs
+	// (docs/07). If found, restore buckets and log result. This enables master takeover.
+	if evacDir := os.Getenv("MIRYMESH_EVAC_DIR"); true {
+		// Local evacuation dir defaults to <DataDir>/.evac or /var/lib/mirymesh/.evac
+		localEvac := evacDir
+		if localEvac == "" {
+			localEvac = filepath.Join(cfg.Server.DataDir, ".evac")
+		}
+		// Remote dirs are datanode evac paths if configured via env or discovered from registry? For now use env MIRYMESH_REMOTE_EVAC_DIRS (comma-separated)
+		var remoteDirs []string
+		if v := os.Getenv("MIRYMESH_REMOTE_EVAC_DIRS"); v != "" {
+			for _, p := range strings.Split(v, ",") {
+				if s := strings.TrimSpace(p); s != "" {
+					remoteDirs = append(remoteDirs, s)
+				}
+			}
+		}
+		if snap, err := metadata.LoadAny(localEvac, remoteDirs); err == nil {
+			slog.Info("controller: evacuation snapshot found, attempting restore", "version", snap.Version, "buckets", len(snap.Buckets))
+			restorer, err := metadata.NewRestorer(cfg.Server.DataDir)
+			if err == nil {
+				if res, err := restorer.Restore(snap); err == nil {
+					slog.Info("controller: restore completed", "created", res.BucketsCreated, "restored", res.BucketsRestored, "missing", res.ObjectsMissing)
+				} else {
+					slog.Warn("controller: restore failed", "err", err)
+				}
+			}
+			adoptedSnapshot = snap
+		}
+	}
 	authStore := auth.NewStore()
 	for _, c := range cfg.Auth.Credentials {
 		_ = authStore.Add(c.AccessKey, c.SecretKey)
@@ -62,6 +96,14 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "controller: invalid storage policy: %v\n", err)
 		os.Exit(1)
+	}
+	// Restore placement policies from adopted snapshot (docs/07)
+	if adoptedSnapshot != nil {
+		for b, pol := range adoptedSnapshot.PlacementPolicies {
+			if p, err := placement.ParsePolicy(pol); err == nil {
+				_ = resolver.SetBucketPolicy(b, p)
+			}
+		}
 	}
 	// TODO: GUI will manage bucket_policy at runtime; resolver.SetBucketPolicy is the wire point.
 	s3Router := s3api.NewRouterWithPlacement(store, cfg.Server.Region, resolver)

@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+services:
+  controller:
+    build:
+      context: ../../..
+      dockerfile: packaging/docker/Dockerfile
+    container_name: mirymesh-controller-e2e
+    ports: ["9000:9000"]
+    environment:
+      MIRYMESH_EVAC_DIR: /var/lib/mirymesh/.evac
+    volumes:
+      - mirymesh-data:/var/lib/mirymesh
+  # Nextcloud with S3 primary storage points to controller S3 API (path-style)
+  nextcloud:
+    image: nextcloud:29-apache
+    depends_on: [controller]
+    environment:
+      NC_S3_BUCKET: e2e-nextcloud
+      NC_S3_KEY: TESTKEY
+      NC_S3_SECRET: testsecret12345
+      NC_S3_HOST: controller:9000
+      NC_S3_USE_PATH_STYLE: "true"
+      NC_S3_AUTOCREATE: "true"
+      NC_S3_VERIFY_BUCKET_EXISTS: "true"
+    ports: ["8080:80"]
+volumes:
+  mirymesh-data:

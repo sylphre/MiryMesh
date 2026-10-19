@@ -4,13 +4,58 @@
 package metadata
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
+
+// FanOut pushes the snapshot to each datanode's /internal/evacuate endpoint.
+func (e *Evacuator) FanOut(snap *EvacuationSnapshot, addrs map[string]string, token string) map[string]error {
+	errs := make(map[string]error)
+	if snap == nil {
+		for id := range addrs {
+			errs[id] = errors.New("snapshot is nil")
+		}
+		return errs
+	}
+	data, err := json.Marshal(snap)
+	if err != nil {
+		for id := range addrs {
+			errs[id] = err
+		}
+		return errs
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	for id, base := range addrs {
+		url := fmt.Sprintf("%s/internal/evacuate", strings.TrimRight(base, "/"))
+		// Wrap with token envelope
+		payload := map[string]any{"token": token, "snapshot": json.RawMessage(data)}
+		body, _ := json.Marshal(payload)
+		req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+		if err != nil {
+			errs[id] = err
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			errs[id] = err
+			continue
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != 200 {
+			errs[id] = fmt.Errorf("status %d", resp.StatusCode)
+		}
+	}
+	return errs
+}
 
 // EvacuationSnapshot is the restart-required metadata that the controller
 // evacuates to data nodes for master takeover recovery (docs/07).
@@ -21,10 +66,14 @@ type EvacuationSnapshot struct {
 	Timestamp time.Time `json:"timestamp"`
 	Buckets   []string  `json:"buckets"`
 	// Objects is a flat list of object keys per bucket (simplified for M5;
-	// future will include placement policy, auth, etc.).
+	// Includes bucket listing and minimal object entries.
 	Objects []ObjectRecord `json:"objects"`
 	// PlacementPolicies captures bucket->policy for recovery.
 	PlacementPolicies map[string]string `json:"placement_policies,omitempty"`
+	// AuthIdentities captures AccessKey identity list for presence check
+	// (secret hashes are not evacuated; new controller must re-seed secrets).
+	// Value is existence marker (e.g. "present").
+	AuthIdentities map[string]string `json:"auth_identities,omitempty"`
 }
 
 // ObjectRecord is a minimal object entry for evacuation.

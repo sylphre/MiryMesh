@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+# nfpm config for MiryMesh — builds DEB (Debian family) and RPM (RHEL family) from same file.
+# Usage:
+#   nfpm pkg --packager deb --config packaging/nfpm.yaml --target mirymesh.deb
+#   nfpm pkg --packager rpm --config packaging/nfpm.yaml --target mirymesh.rpm
+name: mirymesh
+arch: amd64
+platform: linux
+version: 0.0.0-dev
+release: 1
+maintainer: MiryMesh Team
+description: MiryMesh S3 — distributed object storage (controller + datanode + CLI)
+license: AGPL-3.0-only
+vendor: MiryMesh
+homepage: https://github.com/sylphre/MiryMesh
+contents:
+  - src: /tmp/mirymesh-controller
+    dst: /usr/bin/mirymesh-controller
+    file_info: { mode: 0755 }
+  - src: /tmp/mirymesh-datanode
+    dst: /usr/bin/mirymesh-datanode
+    file_info: { mode: 0755 }
+  - src: /tmp/mirymesh
+    dst: /usr/bin/mirymesh
+    file_info: { mode: 0755 }
+  - src: packaging/systemd/mirymesh-controller.service
+    dst: /lib/systemd/system/mirymesh-controller.service
+  - src: packaging/systemd/mirymesh-datanode.service
+    dst: /lib/systemd/system/mirymesh-datanode.service
+  - src: packaging/config/config.yaml.example
+    dst: /etc/mirymesh/config.yaml.example
+  - dst: /var/lib/mirymesh
+    type: dir
+    file_info: { mode: 0750, owner: mirymesh, group: mirymesh }
+  - dst: /var/log/mirymesh
+    type: dir
+    file_info: { mode: 0750, owner: mirymesh, group: mirymesh }
+scripts:
+  preinstall: packaging/scripts/preinstall.sh
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh
