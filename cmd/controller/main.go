@@ -116,7 +116,14 @@ func main() {
 	dnHandler.RegisterRoutes(internalMux)
 
 	jobsStore := replication.NewStore()
-	adminHandler := admin.New(reg, store, resolver, jobsStore, internalToken)
+	// Setup store: /var/lib/mirymesh/setup.json (MVP, merged at startup)
+	setupStore := admin.NewSetupStore(cfg.Server.DataDir)
+	// If setup exists, seed auth and admin token from it
+	if st := setupStore.Get(); st != nil && st.Initialized {
+		_ = authStore.Add(st.AccessKey, st.SecretKey)
+		internalToken = st.AdminToken
+	}
+	adminHandler := admin.NewWithSetup(reg, store, resolver, jobsStore, internalToken, setupStore, authStore)
 	adminMux := http.NewServeMux()
 	adminHandler.RegisterRoutes(adminMux)
 
@@ -127,11 +134,17 @@ func main() {
 	mux.Handle("/api/admin/", adminMux)
 	mux.Handle("/internal/", internalMux)
 	mux.Handle("/static/", http.StripPrefix("/static/", staticFS))
+	// Setup wizard redirect: if not initialized, browser hits to / should go to setup.html
+	setupIsNeeded := !setupStore.IsInitialized() && len(cfg.Auth.Credentials) == 0
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// GUI entry lives at /static/index.html and /admin; root "/" is S3 ListBuckets.
 		// Only redirect browser hits that explicitly accept text/html to the GUI.
 		if r.URL.Path == "/" && r.Header.Get("Authorization") == "" && r.URL.Query().Get("X-Amz-Algorithm") == "" {
 			if contains(r.Header.Get("Accept"), "text/html") {
+				if setupIsNeeded {
+					http.Redirect(w, r, "/static/setup.html", http.StatusFound)
+					return
+				}
 				http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
 				return
 			}

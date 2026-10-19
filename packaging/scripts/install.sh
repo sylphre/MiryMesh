@@ -195,10 +195,10 @@ fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload 2>/dev/null || true
   if [ "$ROLE" = "master" ]; then
-    log "To start Master: sudo systemctl enable --now mirymesh-controller"
+    log "To start Master: sudo systemctl enable --now mirymesh-controller && xdg-open http://127.0.0.1:9000/  (setup wizard at /static/setup.html)"
+    log "Setup:    Master 初回はブラウザで http://master:9000/ → /static/setup.html で AccessKey/Secret/Policy を入力 (Admin Token は localStorage に保存)"
     log "Status:   systemctl status mirymesh-controller; journalctl -u mirymesh-controller -f"
     log "Health:   curl -f http://127.0.0.1:9000/healthz"
-    log "Admin GUI: http://127.0.0.1:9000/static/  or  http://127.0.0.1:9000/ (browser)"
   else
     log "To start Client: sudo systemctl enable --now mirymesh-datanode"
     log "Status:   systemctl status mirymesh-datanode; journalctl -u mirymesh-datanode -f"

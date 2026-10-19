@@ -1,0 +1,89 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. -->
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MiryMesh — Settings</title>
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/layout.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="topbar__title">MiryMesh S3 — Settings</h1>
+    <nav class="topbar__nav">
+      <a href="/static/index.html" class="topbar__link">Dashboard</a>
+      <a href="/static/nodes.html" class="topbar__link">Nodes</a>
+      <a href="/static/disks.html" class="topbar__link">Disks</a>
+      <a href="/static/buckets.html" class="topbar__link">Buckets</a>
+      <a href="/static/jobs.html" class="topbar__link">Jobs</a>
+      <a href="/static/settings.html" class="topbar__link topbar__link--active">Settings</a>
+    </nav>
+  </header>
+  <main class="container">
+    <div class="card">
+      <h3>Default Policy</h3>
+      <p id="policy-status" class="state--loading">Loading…</p>
+      <form id="policy-form" class="form">
+        <select name="policy" class="input">
+          <option value="single">single</option>
+          <option value="dual">dual</option>
+          <option value="triple">triple</option>
+          <option value="ALL">ALL</option>
+        </select>
+        <button type="submit" class="btn btn--primary">保存</button>
+      </form>
+    </div>
+    <div class="card">
+      <h3>DataNode Paths</h3>
+      <p id="paths-status" class="state--loading">Loading…</p>
+      <div id="paths"></div>
+    </div>
+  </main>
+  <script src="/static/js/api.js"></script>
+  <script>
+  (async function() {
+    const statusEl = document.getElementById("policy-status");
+    const form = document.getElementById("policy-form");
+    const token = localStorage.getItem("mirymesh_admin_token") || "";
+    const headers = token ? { "X-Admin-Token": token } : {};
+    // Load current config
+    try {
+      const res = await fetch("/api/admin/config", { headers });
+      if (!res.ok) throw new Error(await res.text());
+      const j = await res.json();
+      statusEl.textContent = "Current: " + (j.default_policy || "single") + " | Paths: " + (j.paths||[]).join(", ");
+      statusEl.className = "state--success";
+      form.elements.policy.value = j.default_policy || "single";
+      const pathsEl = document.getElementById("paths");
+      const disks = j.disks || [];
+      if (!disks.length) pathsEl.textContent = "No disks";
+      else {
+        const rows = disks.map(d => `${d.NodeID}:${d.Path} (${d.Capacity} cap, ${d.Used} used)`);
+        pathsEl.innerHTML = rows.map(r => "<div>" + r + "</div>").join("");
+      }
+      document.getElementById("paths-status").style.display = "none";
+    } catch (e) {
+      statusEl.textContent = "Error: " + e.message;
+      statusEl.className = "state--error";
+    }
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        const res = await fetch("/api/admin/config/policy", { method: "PUT", headers: { "Content-Type": "application/json", "X-Admin-Token": token }, body: JSON.stringify({ policy: form.elements.policy.value }) });
+        if (!res.ok) throw new Error(await res.text());
+        const j = await res.json();
+        statusEl.textContent = "Saved: " + j.default_policy;
+        statusEl.className = "state--success";
+      } catch (err) {
+        statusEl.textContent = "Failed: " + err.message;
+        statusEl.className = "state--error";
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

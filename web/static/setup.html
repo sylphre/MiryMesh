@@ -1,0 +1,83 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. -->
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MiryMesh — Setup</title>
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/layout.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="topbar__title">MiryMesh S3 — Setup</h1>
+  </header>
+  <main class="container">
+    <div class="card" id="setup-card">
+      <h2>初期設定</h2>
+      <p class="state--loading" id="status">読み込み中…</p>
+      <form id="setup-form" class="form" style="flex-direction:column;align-items:stretch;display:none;">
+        <label>AccessKey <input name="access_key" class="input" required minlength="3" placeholder="TESTKEY" /></label>
+        <label>SecretKey <input name="secret_key" class="input" type="password" required minlength="8" placeholder="8+ chars" /></label>
+        <label>Default Policy
+          <select name="default_policy" class="input">
+            <option value="single">single</option>
+            <option value="dual">dual</option>
+            <option value="triple">triple</option>
+            <option value="ALL">ALL</option>
+          </select>
+        </label>
+        <button type="submit" class="btn btn--primary">セットアップ完了</button>
+      </form>
+      <div id="done" style="display:none;">
+        <p class="state--success">セットアップが完了しました。Admin Token は localStorage に保存されました。</p>
+        <p><a href="/static/index.html" class="btn btn--primary">ダッシュボードへ</a></p>
+      </div>
+    </div>
+  </main>
+  <script>
+  (async function() {
+    const statusEl = document.getElementById("status");
+    const form = document.getElementById("setup-form");
+    const done = document.getElementById("done");
+    try {
+      const res = await fetch("/api/admin/setup/status");
+      const j = await res.json();
+      if (j.initialized) {
+        statusEl.textContent = "既に初期化済みです。ダッシュボードへ進んでください。";
+        statusEl.className = "state--success";
+        return;
+      }
+    } catch (e) {
+      statusEl.textContent = "状態取得に失敗: " + e.message;
+      statusEl.className = "state--error";
+      return;
+    }
+    statusEl.style.display = "none";
+    form.style.display = "";
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const data = { access_key: form.elements.access_key.value, secret_key: form.elements.secret_key.value, default_policy: form.elements.default_policy.value };
+      try {
+        const res = await fetch("/api/admin/setup", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(data) });
+        if (!res.ok) throw new Error(await res.text());
+        const j = await res.json();
+        localStorage.setItem("mirymesh_admin_token", j.admin_token);
+        statusEl.textContent = "Admin Token を保存しました: " + j.admin_token;
+        statusEl.className = "state--success";
+        statusEl.style.display = "";
+        form.style.display = "none";
+        done.style.display = "";
+      } catch (err) {
+        statusEl.textContent = "失敗: " + err.message;
+        statusEl.className = "state--error";
+        statusEl.style.display = "";
+      }
+    });
+  })();
+  </script>
+</body>
+</html>
