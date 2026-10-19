@@ -14,14 +14,14 @@ async function initBuckets() {
       const cluster = await MiryMeshAPI.cluster();
       // cluster.buckets is string[]; policies not yet in cluster, so fallback to per-bucket only if needed.
       // For now use cached policies from cluster if available (future: include in cluster).
-      _ = cluster;
-    } catch (_) {}
+      void cluster;
+    } catch {}
     const esc = MiryMeshAPI.escapeHTML;
     if (Object.keys(policyMap).length === 0) {
       // Fetch policies sequentially with escape; still N+1 but isolated for now.
       // TODO: extend /api/admin/buckets to return policies in one call to eliminate N+1.
       for (const b of data.buckets) {
-        try { const p = await MiryMeshAPI.getBucketPolicy(b); policyMap[b] = p.policy; } catch (_) { policyMap[b] = "?"; }
+        try { const p = await MiryMeshAPI.getBucketPolicy(b); policyMap[b] = p.policy; } catch { policyMap[b] = "?"; }
       }
     }
     listEl.innerHTML = data.buckets.map((b) => {
