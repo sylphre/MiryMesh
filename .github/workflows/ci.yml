@@ -40,3 +40,49 @@ jobs:
         run: go test ./... -count=1 -coverprofile=coverage.txt
       - name: build all cmds
         run: go build ./...
+
+  e2e:
+    runs-on: ubuntu-24.04
+    needs: lint-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: e2e — S3 P0 + SigV4 variants + fault
+        run: go test ./tests/e2e/... -count=1 -race -run Test
+
+  packaging:
+    runs-on: ubuntu-24.04
+    needs: lint-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: build binaries
+        run: go build -trimpath -o /tmp/mirymesh-controller ./cmd/controller && go build -trimpath -o /tmp/mirymesh-datanode ./cmd/datanode && go build -trimpath -o /tmp/mirymesh ./cmd/mirymesh && ls -lh /tmp/mirymesh*
+      - name: docker build (no push)
+        run: docker build -f packaging/docker/Dockerfile -t mirymesh:ci .
+
+  linux-matrix:
+    runs-on: ${{ matrix.os }}
+    needs: lint-test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04]
+        # TODO: expand to [ubuntu-24.04, ubuntu-22.04] + containerized Debian 12/13, Alma 9/10, Rocky 9/10
+        # Debian/RHEL families will be exercised via containers or dedicated runners; see packaging/README.md
+        include:
+          - os: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: go vet + test (matrix smoke)
+        run: go vet ./... && go test ./... -count=1 -short
