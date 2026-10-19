@@ -25,7 +25,11 @@
   </header>
   <main class="container">
     <div class="card">
-      <h3>Default Policy</h3>
+      <h3>Mode</h3>
+      <p id="mode-status" class="state--loading">Loading…</p>
+    </div>
+    <div class="card">
+      <h3>Default Placement Policy</h3>
       <p id="policy-status" class="state--loading">Loading…</p>
       <form id="policy-form" class="form">
         <select name="policy" class="input">
@@ -48,6 +52,7 @@
   (async function() {
     const statusEl = document.getElementById("policy-status");
     const form = document.getElementById("policy-form");
+    const modeEl = document.getElementById("mode-status");
     const token = localStorage.getItem("mirymesh_admin_token") || "";
     const headers = token ? { "X-Admin-Token": token } : {};
     // Load current config
@@ -55,6 +60,8 @@
       const res = await fetch("/api/admin/config", { headers });
       if (!res.ok) throw new Error(await res.text());
       const j = await res.json();
+      modeEl.textContent = "Mode: " + (j.mode || "standalone") + (j.mode === "gateway" ? " (Master holds no S3 objects; all data on DataNodes)" : "");
+      modeEl.className = "state--success";
       statusEl.textContent = "Current: " + (j.default_policy || "single") + " | Paths: " + (j.paths||[]).join(", ");
       statusEl.className = "state--success";
       form.elements.policy.value = j.default_policy || "single";
@@ -68,6 +75,8 @@
       }
       document.getElementById("paths-status").style.display = "none";
     } catch (e) {
+      modeEl.textContent = "Error: " + e.message;
+      modeEl.className = "state--error";
       statusEl.textContent = "Error: " + e.message;
       statusEl.className = "state--error";
     }

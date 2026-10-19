@@ -69,7 +69,7 @@ func (rt *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 		return
 	}
 	// Validate bucket/key match upload?
-	s := rt.store.getUpload(uploadID)
+	s := rt.store.GetUpload(uploadID)
 	if s != nil && (s.Bucket != bucket || s.Key != key) {
 		writeError(w, r, APIError{Code: "NoSuchUpload", Message: "The specified upload does not exist", Status: 404})
 		return

@@ -14,7 +14,7 @@ import (
 // Router routes S3-compatible requests. In M1 it handles path-style only
 // (virtual-hosted style is shimmable but not required for Nextcloud/Misskey).
 type Router struct {
-	store   *Storage
+	store   ObjectStore
 	region  string
 	placing PlacementResolver
 }
@@ -27,7 +27,7 @@ type PlacementResolver interface {
 }
 
 // NewRouter creates a Router.
-func NewRouter(store *Storage, region string) *Router {
+func NewRouter(store ObjectStore, region string) *Router {
 	if region == "" {
 		region = "us-east-1"
 	}
@@ -35,7 +35,7 @@ func NewRouter(store *Storage, region string) *Router {
 }
 
 // NewRouterWithPlacement creates a Router with placement resolver.
-func NewRouterWithPlacement(store *Storage, region string, resolver PlacementResolver) *Router {
+func NewRouterWithPlacement(store ObjectStore, region string, resolver PlacementResolver) *Router {
 	if region == "" {
 		region = "us-east-1"
 	}

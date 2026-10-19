@@ -29,7 +29,7 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		writeError(w, r, errInvalidRequest)
 		return
 	}
-	s := rt.store.getUpload(uploadID)
+	s := rt.store.GetUpload(uploadID)
 	if s == nil || s.Bucket != bucket || s.Key != key {
 		writeError(w, r, APIError{Code: "NoSuchUpload", Message: "The specified upload does not exist", Status: 404})
 		return
@@ -84,7 +84,7 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		srcData = srcData[start : end+1]
 	}
 	// Write part file via streaming hash (already have srcData but keep streaming path for consistency).
-	dir := rt.store.multipartDir(uploadID)
+	dir := rt.store.MultipartDir(uploadID)
 	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
 		writeXMLError(w, r, 500, "InternalError", mkErr.Error())
 		return
@@ -115,14 +115,12 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		return
 	}
 	rec := PartRecord{PartNumber: partNumber, ETag: etag, Size: int64(len(srcData)), Path: path}
-	rt.store.mu.Lock()
-	if st, ok := rt.store.uploads[uploadID]; ok {
+	if st := rt.store.GetUpload(uploadID); st != nil {
 		if st.Parts == nil {
 			st.Parts = make(map[int]PartRecord)
 		}
 		st.Parts[partNumber] = rec
 	}
-	rt.store.mu.Unlock()
 	type resp struct {
 		XMLName      xml.Name `xml:"CopyPartResult"`
 		Xmlns        string   `xml:"xmlns,attr"`

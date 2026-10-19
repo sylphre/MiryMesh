@@ -4,6 +4,7 @@
 server:
   listen: ":9000"
   admin_listen: ":9001" # Admin GUI/API: keep on Tailscale or localhost, do NOT expose to 0.0.0.0 if possible
+  mode: gateway # Master holds no S3 objects; all data lives on DataNodes. "" or "standalone" = master also stores (single-node)
   region: "us-east-1"
   data_dir: "/var/lib/mirymesh"
 auth:

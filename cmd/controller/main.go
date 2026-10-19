@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -45,10 +46,25 @@ func main() {
 		fmt.Fprintf(os.Stderr, "controller: invalid config: %v\n", vErr)
 		os.Exit(1)
 	}
-	store, err := s3api.NewStorage(cfg.Server.DataDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "controller: init storage: %v\n", err)
-		os.Exit(1)
+	var store s3api.ObjectStore
+	if cfg.Server.Mode == "gateway" {
+		// Gateway: S3 data lives only on DataNodes; controller holds bucket meta only.
+		// DataDir is still used for setup.json/.evac.
+		if cfg.Server.DataDir != "" {
+			_ = os.MkdirAll(cfg.Server.DataDir, 0o750)
+		} else {
+			cfg.Server.DataDir = "/var/lib/mirymesh"
+			_ = os.MkdirAll(cfg.Server.DataDir, 0o750)
+		}
+		// Temporary: RemoteStore will be created after registry is ready; use local bucket set for now
+		store = &gatewayPlaceholder{dataDir: cfg.Server.DataDir}
+	} else {
+		ls, err2 := s3api.NewStorage(cfg.Server.DataDir)
+		if err2 != nil {
+			fmt.Fprintf(os.Stderr, "controller: init storage: %v\n", err2)
+			os.Exit(1)
+		}
+		store = ls
 	}
 	// Adoption mode: load snapshot early to restore storage, then restore placement after resolver
 	var adoptedSnapshot *metadata.EvacuationSnapshot
@@ -198,6 +214,69 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// gatewayPlaceholder holds bucket meta only when in gateway mode until RemoteStore is wired.
+// It will be replaced with RemoteStore once registry is available.
+type gatewayPlaceholder struct {
+	dataDir string
+	buckets map[string]struct{}
+}
+
+func (g *gatewayPlaceholder) CreateBucket(b string) error {
+	if g.buckets == nil {
+		g.buckets = make(map[string]struct{})
+	}
+	g.buckets[b] = struct{}{}
+	return nil
+}
+func (g *gatewayPlaceholder) BucketExists(b string) bool  { _, ok := g.buckets[b]; return ok }
+func (g *gatewayPlaceholder) DeleteBucket(b string) error { delete(g.buckets, b); return nil }
+func (g *gatewayPlaceholder) ListBuckets() []string {
+	var o []string
+	for k := range g.buckets {
+		o = append(o, k)
+	}
+	return o
+}
+func (g *gatewayPlaceholder) PutObject(b, k, ct string, meta map[string]string, r io.Reader) (s3api.ObjectMeta, error) {
+	return s3api.ObjectMeta{}, fmt.Errorf("gateway: put requires DataNode — register at least one")
+}
+func (g *gatewayPlaceholder) GetObject(b, k string) (s3api.ObjectMeta, io.ReadCloser, error) {
+	return s3api.ObjectMeta{}, nil, fmt.Errorf("gateway: no objects")
+}
+func (g *gatewayPlaceholder) HeadObject(b, k string) (s3api.ObjectMeta, error) {
+	return s3api.ObjectMeta{}, fmt.Errorf("not found")
+}
+func (g *gatewayPlaceholder) DeleteObject(b, k string) error { return nil }
+func (g *gatewayPlaceholder) ListObjectsV2(b, prefix, delim, cont string, max int) (s3api.ListObjectsV2Result, error) {
+	return s3api.ListObjectsV2Result{}, nil
+}
+func (g *gatewayPlaceholder) CreateMultipartUpload(b, k, ct string, meta map[string]string) (*s3api.MultipartUploadState, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (g *gatewayPlaceholder) UploadPart(id string, n int, r io.Reader) (s3api.PartRecord, error) {
+	return s3api.PartRecord{}, fmt.Errorf("not implemented")
+}
+func (g *gatewayPlaceholder) ListParts(id string) ([]s3api.PartRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (g *gatewayPlaceholder) ListMultipartUploads(b string) ([]*s3api.MultipartUploadState, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (g *gatewayPlaceholder) AbortMultipartUpload(id string) error {
+	return fmt.Errorf("not implemented")
+}
+func (g *gatewayPlaceholder) CompleteMultipartUpload(id string, parts []s3api.CompletePart) (s3api.ObjectMeta, error) {
+	return s3api.ObjectMeta{}, fmt.Errorf("not implemented")
+}
+func (g *gatewayPlaceholder) GetUpload(id string) *s3api.MultipartUploadState { return nil }
+func (g *gatewayPlaceholder) MultipartDir(id string) string                   { return "" }
+
+func (g *gatewayPlaceholder) Root() string              { return g.dataDir }
+func (g *gatewayPlaceholder) FilesystemCapacity() int64 { return 0 }
+func (g *gatewayPlaceholder) FilesystemAvail() int64    { return 0 }
+func (g *gatewayPlaceholder) FilesystemUsed() int64     { return 0 }
+func (g *gatewayPlaceholder) IsOverQuota(int64) bool    { return false }
 
 func healthHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -10,6 +10,11 @@ import (
 	"github.com/sylphre/MiryMesh/internal/placement"
 )
 
+// mode returns server mode (gateway/standalone) as stored in config via setup.json? For now derive from storage gateway flag if available.
+// Admin handler stores mode via config — expose via setupStore? For MVP, read from resolver? Simpler: expose as "standalone" unless gatewayPlaceholder is used.
+// We expose mode from setupStore DefaultPolicy? No — mode is in ServerConfig.Mode. Handler doesn't have direct config access, so store it in SetupState extension.
+// For MVP, expose mode via env hint: if disks exist, show standalone.
+
 func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if !h.checkAuth(w, r) {
 		return
@@ -36,9 +41,12 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 			paths = append(paths, d.Path)
 		}
 	}
+	mode := "standalone"
+	// Try to infer gateway from setupStore extra? For now keep standalone; controller will inject via header if needed.
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"default_policy": policy,
+		"mode":           mode,
 		"paths":          paths,
 		"disks":          disks,
 		"initialized":    h.setupStore.IsInitialized(),

@@ -27,6 +27,38 @@ type ObjectMeta struct {
 	Meta map[string]string
 }
 
+// ObjectStore abstracts bucket/object operations for gateway vs standalone.
+// Standalone: LocalStore (file). Gateway: RemoteStore (DataNode HTTP fan-out).
+type ObjectStore interface {
+	CreateBucket(bucket string) error
+	BucketExists(bucket string) bool
+	DeleteBucket(bucket string) error
+	ListBuckets() []string
+	PutObject(bucket, key string, contentType string, meta map[string]string, r io.Reader) (ObjectMeta, error)
+	GetObject(bucket, key string) (ObjectMeta, io.ReadCloser, error)
+	HeadObject(bucket, key string) (ObjectMeta, error)
+	DeleteObject(bucket, key string) error
+	ListObjectsV2(bucket, prefix, delimiter, continuationToken string, maxKeys int) (ListObjectsV2Result, error)
+	// multipart
+	CreateMultipartUpload(bucket, key, contentType string, meta map[string]string) (*MultipartUploadState, error)
+	UploadPart(uploadID string, partNumber int, r io.Reader) (PartRecord, error)
+	ListParts(uploadID string) ([]PartRecord, error)
+	ListMultipartUploads(bucket string) ([]*MultipartUploadState, error)
+	AbortMultipartUpload(uploadID string) error
+	CompleteMultipartUpload(uploadID string, parts []CompletePart) (ObjectMeta, error)
+	// fs helpers for quota/health
+	// internal: upload introspection for handlers
+	GetUpload(uploadID string) *MultipartUploadState
+	MultipartDir(uploadID string) string
+	Root() string
+	FilesystemCapacity() int64
+	FilesystemAvail() int64
+	FilesystemUsed() int64
+	IsOverQuota(additional int64) bool
+}
+
+type LocalStore = Storage
+
 // Storage is the local filesystem backend for M1 (single-node).
 // Later milestones replace placement with multi-node (see internal/metadata).
 // TODO(M2): replace in-memory meta map with DB-backed metadata (PostgreSQL

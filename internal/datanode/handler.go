@@ -6,12 +6,24 @@ package datanode
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
 	"github.com/sylphre/MiryMesh/internal/metadata"
 )
+
+// ObjectStore is the local storage interface for DataNode objects (subset of s3api.ObjectStore, defined here to avoid import cycle).
+type ObjectStore interface {
+	PutObject(bucket, key string, contentType string, meta map[string]string, r io.Reader) (interface{ GetETag() string }, error)
+	GetObject(bucket, key string) (interface{ GetContentType() string }, io.ReadCloser, error)
+	HeadObject(bucket, key string) (interface{}, error)
+	DeleteObject(bucket, key string) error
+	ListObjectsV2(bucket, prefix, delimiter, continuationToken string, maxKeys int) (interface{}, error)
+	BucketExists(bucket string) bool
+}
 
 // Handler serves controller-side internal API for datanode registration,
 // heartbeat and disk management. It does NOT handle S3 requests.
@@ -22,6 +34,8 @@ type Handler struct {
 	token string
 	// evacDir is the controller-side evacuation dir for backup/restore (M5).
 	evacDir string
+	// store is the local object store on the DataNode (DataNode only).
+	store interface{}
 }
 
 // NewHandler creates a Handler.
@@ -34,6 +48,11 @@ func NewHandlerWithEvacDir(reg *Registry, token, evacDir string) *Handler {
 	return &Handler{registry: reg, token: token, evacDir: evacDir}
 }
 
+// NewHandlerWithObjects creates a DataNode-side Handler with local store bound.
+func NewHandlerWithObjects(reg *Registry, token string, store interface{}) *Handler {
+	return &Handler{registry: reg, token: token, store: store}
+}
+
 // RegisterRoutes mounts /internal/* endpoints on mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/internal/register", h.handleRegister)
@@ -42,6 +61,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/internal/nodes", h.handleListNodes)
 	mux.HandleFunc("/internal/evacuate", h.handleEvacuate)
 	mux.HandleFunc("/internal/restore", h.handleRestore)
+	// ObjectStore passthrough for gateway mode
+	mux.HandleFunc("/internal/objects/", h.handleObjects)
 }
 
 type registerReq struct {
@@ -233,4 +254,138 @@ func (h *Handler) handleRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(snap)
+}
+
+// objectStore is the minimal DataNode storage interface (avoids import cycle with s3api).
+type objectStore interface {
+	PutObject(bucket, key string, contentType string, meta map[string]string, r io.Reader) (objectMeta, error)
+	GetObject(bucket, key string) (objectMeta, io.ReadCloser, error)
+	HeadObject(bucket, key string) (objectMeta, error)
+	DeleteObject(bucket, key string) error
+	ListObjectsV2(bucket, prefix, delimiter, continuationToken string, maxKeys int) (objectListResult, error)
+}
+type objectMeta struct {
+	ETag, ContentType string
+	Meta              map[string]string
+}
+type objectListResult struct {
+	Objects        []objectMeta
+	CommonPrefixes []string
+}
+
+func (h *Handler) tryStore() (objectStore, bool) {
+	s, ok := h.store.(objectStore)
+	return s, ok
+}
+
+// handleObjects proxies S3 object operations to local storage on the DataNode itself.
+// Controller's RemoteStore calls this via http.Client (streaming).
+// Path: /internal/objects/{bucket}/{key...} (+ ?prefix/delimiter/continuation-token/max-keys for list, ?token for auth)
+func (h *Handler) handleObjects(w http.ResponseWriter, r *http.Request) {
+	if h.store == nil {
+		http.Error(w, "DataNode storage not configured", http.StatusInternalServerError)
+		return
+	}
+	if h.token != "" && r.Header.Get("X-Internal-Token") != h.token && r.URL.Query().Get("token") != h.token {
+		http.Error(w, "invalid token", http.StatusForbidden)
+		return
+	}
+	s, ok := h.tryStore()
+	if !ok {
+		http.Error(w, "DataNode storage type mismatch", http.StatusInternalServerError)
+		return
+	}
+	// Unescape path
+	trim := strings.TrimPrefix(r.URL.Path, "/internal/objects/")
+	if dec, err := url.PathUnescape(trim); err == nil {
+		trim = dec
+	}
+	parts := strings.SplitN(trim, "/", 2)
+	bucket := ""
+	key := ""
+	if len(parts) >= 1 {
+		bucket, _ = url.PathUnescape(parts[0])
+	}
+	if len(parts) == 2 {
+		key, _ = url.PathUnescape(parts[1])
+	}
+	// Bucket-level list: GET /internal/objects/{bucket}?prefix=&delimiter=&continuation-token=&max-keys=
+	if r.Method == http.MethodGet && key == "" {
+		q := r.URL.Query()
+		prefix := q.Get("prefix")
+		delimiter := q.Get("delimiter")
+		cont := q.Get("continuation-token")
+		maxKeysStr := q.Get("max-keys")
+		maxKeys := 1000
+		if maxKeysStr != "" {
+			_, _ = fmt.Sscanf(maxKeysStr, "%d", &maxKeys)
+		}
+		res, err := s.ListObjectsV2(bucket, prefix, delimiter, cont, maxKeys)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"objects": res.Objects, "prefixes": res.CommonPrefixes})
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		ct := r.Header.Get("Content-Type")
+		if ct == "" {
+			ct = r.Header.Get("content-type")
+		}
+		meta := map[string]string{}
+		for k, vs := range r.Header {
+			lk := strings.ToLower(k)
+			if strings.HasPrefix(lk, "x-amz-meta-") {
+				meta[lk[len("x-amz-meta-"):]] = strings.Join(vs, ",")
+			}
+		}
+		m, err := s.PutObject(bucket, key, ct, meta, r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("ETag", m.ETag) // objectMeta
+		w.WriteHeader(200)
+	case http.MethodGet:
+		meta, rc, err := s.GetObject(bucket, key)
+		if err != nil {
+			http.Error(w, err.Error(), 404)
+			return
+		}
+		defer rc.Close()
+		w.Header().Set("ETag", meta.ETag)
+		if meta.ContentType != "" {
+			w.Header().Set("Content-Type", meta.ContentType)
+		}
+		for k, v := range meta.Meta {
+			w.Header().Set("X-Amz-Meta-"+k, v)
+		}
+		w.WriteHeader(200)
+		_, _ = io.Copy(w, rc)
+	case http.MethodHead:
+		meta, err := s.HeadObject(bucket, key)
+		if err != nil {
+			http.Error(w, err.Error(), 404)
+			return
+		}
+		w.Header().Set("ETag", meta.ETag)
+		if meta.ContentType != "" {
+			w.Header().Set("Content-Type", meta.ContentType)
+		}
+		for k, v := range meta.Meta {
+			w.Header().Set("X-Amz-Meta-"+k, v)
+		}
+		w.WriteHeader(200)
+	case http.MethodDelete:
+		if err := s.DeleteObject(bucket, key); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.WriteHeader(204)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }

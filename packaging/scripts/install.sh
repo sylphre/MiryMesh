@@ -76,6 +76,23 @@ if [ -z "$ROLE" ]; then
   fi
 fi
 
+# For master, ask gateway mode (Master holds no S3 objects)
+if [ "$ROLE" = "master" ]; then
+  if [ -t 0 ] || [ -c /dev/tty ]; then
+    printf "Master gateway? (y = Master holds no S3 objects, all on DataNodes) [y/N]: "
+    if [ -c /dev/tty ]; then read -r ans < /dev/tty || true; else read -r ans || true; fi
+    case "$ans" in
+      y|Y|yes|YES) MASTER_GATEWAY="yes" ;;
+      *) MASTER_GATEWAY="no" ;;
+    esac
+    if [ "$MASTER_GATEWAY" = "yes" ]; then
+      log "Gateway mode selected — Master will hold no S3 objects. Register at least one DataNode or Put will be 507."
+    fi
+  else
+    MASTER_GATEWAY="no"
+  fi
+fi
+
 # For client, ensure master URL
 if [ "$ROLE" = "client" ] && [ -z "$MASTER_URL" ]; then
   if [ -t 0 ] || [ -c /dev/tty ]; then
@@ -165,6 +182,14 @@ if [ ! -f /etc/mirymesh/config.yaml ] && [ -f "$SRC/packaging/config/config.yaml
   cp "$SRC/packaging/config/config.yaml.example" /etc/mirymesh/config.yaml
   chmod 0600 /etc/mirymesh/config.yaml 2>/dev/null || true
   log "Created /etc/mirymesh/config.yaml from example (0600)"
+  if [ "${MASTER_GATEWAY:-no}" = "yes" ]; then
+    if grep -q "^  mode:" /etc/mirymesh/config.yaml 2>/dev/null; then
+      sed -i "s/^  mode:.*/  mode: gateway/" /etc/mirymesh/config.yaml
+    else
+      sed -i "/^server:/a\  mode: gateway" /etc/mirymesh/config.yaml 2>/dev/null || printf "  mode: gateway\n" >> /etc/mirymesh/config.yaml
+    fi
+    log "Gateway mode: wrote mode: gateway to /etc/mirymesh/config.yaml — DataNode 登録がないと Put は 507 になります"
+  fi
   if [ "$ROLE" = "client" ] && [ -n "$MASTER_URL" ]; then
     # Inject master URL into config for DataNode
     if grep -q "controller_url:" /etc/mirymesh/config.yaml 2>/dev/null; then

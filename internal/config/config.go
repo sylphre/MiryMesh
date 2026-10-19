@@ -32,6 +32,7 @@ type Config struct {
 type ServerConfig struct {
 	Listen      string `yaml:"listen"`
 	AdminListen string `yaml:"admin_listen"`
+	Mode        string `yaml:"mode"` // ""|standalone|gateway (default standalone: master holds S3 objects)
 	Region      string `yaml:"region"`
 	DataDir     string `yaml:"data_dir"`
 }
@@ -54,6 +55,7 @@ type DatanodeConfig struct {
 type StorageConfig struct {
 	DefaultPolicy string            `yaml:"default_policy"`
 	BucketPolicy  map[string]string `yaml:"bucket_policy"`
+	Gateway       bool              `yaml:"gateway"` // alias for Server.Mode=gateway (if true, master holds no S3 objects)
 }
 
 // AuthConfig holds S3 credential settings for standalone / single-node mode.
@@ -129,6 +131,13 @@ func Load(path string) (Config, error) {
 	if strings.TrimSpace(cfg.Server.AdminListen) == "" {
 		cfg.Server.AdminListen = ":9001"
 	}
+	// Normalize gateway alias
+	if cfg.Storage.Gateway {
+		cfg.Server.Mode = "gateway"
+	}
+	if cfg.Server.Mode == "gateway" {
+		cfg.Storage.Gateway = true
+	}
 	return cfg, nil
 }
 
@@ -189,12 +198,18 @@ func (s ServerConfig) validate() error {
 			return fmt.Errorf("admin_listen %q must not equal listen %q", s.AdminListen, s.Listen)
 		}
 	}
+	if s.Mode != "" && s.Mode != "standalone" && s.Mode != "gateway" {
+		return fmt.Errorf("mode %q must be one of \"\"|standalone|gateway", s.Mode)
+	}
+	if s.Mode != "gateway" {
+		if s.DataDir != "" && !filepath.IsAbs(s.DataDir) {
+			return fmt.Errorf("data_dir %q must be an absolute path", s.DataDir)
+		}
+	}
 	if s.Region != "" && !regionRe.MatchString(s.Region) {
 		return fmt.Errorf("region %q must match %s", s.Region, regionRe.String())
 	}
-	if s.DataDir != "" && !filepath.IsAbs(s.DataDir) {
-		return fmt.Errorf("data_dir %q must be an absolute path", s.DataDir)
-	}
+	// In gateway mode DataDir may be empty (only .evac/setup needed)
 	return nil
 }
 

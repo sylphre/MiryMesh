@@ -9,10 +9,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/sylphre/MiryMesh/internal/config"
 	"github.com/sylphre/MiryMesh/internal/datanode"
+	"github.com/sylphre/MiryMesh/internal/s3api"
 )
 
 func main() {
@@ -36,22 +38,50 @@ func main() {
 		fmt.Fprintf(os.Stderr, "datanode: invalid config: %v\n", vErr)
 		os.Exit(1)
 	}
+	// DataNode local storage for gateway objects: use first Datanode path or fallback
+	var store s3api.ObjectStore
+	storePath := ""
+	if len(cfg.Datanode.Paths) > 0 {
+		storePath = cfg.Datanode.Paths[0]
+	}
+	if storePath == "" {
+		storePath = filepath.Join("/var/lib/mirymesh", "data")
+	}
+	if err := os.MkdirAll(storePath, 0o750); err == nil {
+		if s, sErr := s3api.NewStorage(storePath); sErr == nil {
+			store = s
+			slog.Info("datanode: local store", "path", storePath)
+		} else {
+			slog.Warn("datanode: local store init failed", "err", sErr)
+		}
+	}
 	agent := datanode.NewAgent(cfg)
-	// Health endpoint for liveness probe.
+	// Serve DataNode internal API including /internal/objects/* for gateway
 	mux := http.NewServeMux()
+	reg := datanode.NewRegistry(30*time.Second, 90*time.Second)
+	token := ""
+	if len(cfg.Auth.Credentials) > 0 {
+		token = cfg.Auth.Credentials[0].SecretKey
+	}
+	dnHandler := datanode.NewHandlerWithObjects(reg, token, store)
+	dnHandler.RegisterRoutes(mux)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	// Run health server if we have a listen addr? Datanode reuses controller listen for now if not set.
-	// Otherwise start registration + heartbeat loop in background.
+	// Listen on :9002 by default (DataNode)
+	listen := ":9002"
+	go func() {
+		slog.Info("datanode: listening", "addr", listen)
+		if err := http.ListenAndServe(listen, mux); err != nil {
+			slog.Error("datanode: listen failed", "err", err)
+		}
+	}()
 	go func() {
 		if err := agent.RegisterAndHeartbeatLoop(time.NewTicker(30 * time.Second)); err != nil {
 			slog.Error("datanode: register loop failed", "err", err)
 		}
 	}()
-	// Keep process alive; health endpoint is optional future.
-	_ = mux
 	slog.Info("mirymesh-datanode started", "controller", cfg.Datanode.ControllerURL, "paths", cfg.Datanode.Paths)
 	select {}
 }

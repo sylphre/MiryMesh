@@ -57,7 +57,7 @@ func (s *Storage) loadUploads() error {
 	}
 	for k, v := range m {
 		// Only restore if multipart dir still exists (parts not cleaned)
-		if _, err := os.Stat(s.multipartDir(k)); err == nil {
+		if _, err := os.Stat(s.MultipartDir(k)); err == nil {
 			s.uploads[k] = v
 		}
 	}
@@ -66,7 +66,7 @@ func (s *Storage) loadUploads() error {
 }
 
 func (s *Storage) multipartBase() string { return filepath.Join(s.root, ".multipart") }
-func (s *Storage) multipartDir(uploadID string) string {
+func (s *Storage) MultipartDir(uploadID string) string {
 	return filepath.Join(s.multipartBase(), uploadID)
 }
 
@@ -89,7 +89,7 @@ func (s *Storage) CreateMultipartUpload(bucket, key, contentType string, meta ma
 		ct = "application/octet-stream"
 	}
 	uploadID := newUploadID()
-	dir := s.multipartDir(uploadID)
+	dir := s.MultipartDir(uploadID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func (s *Storage) UploadPart(uploadID string, partNumber int, r io.Reader) (Part
 	if !ok {
 		return PartRecord{}, APIError{Code: "NoSuchUpload", Message: "The specified upload does not exist", Status: 404}
 	}
-	dir := s.multipartDir(uploadID)
+	dir := s.MultipartDir(uploadID)
 	path := filepath.Join(dir, fmt.Sprintf("part-%05d", partNumber))
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
@@ -188,7 +188,7 @@ func (s *Storage) ListMultipartUploads(bucket string) ([]*MultipartUploadState, 
 }
 
 // getUpload returns upload state for handler validation.
-func (s *Storage) getUpload(uploadID string) *MultipartUploadState {
+func (s *Storage) GetUpload(uploadID string) *MultipartUploadState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if st, ok := s.uploads[uploadID]; ok {
@@ -209,7 +209,7 @@ func (s *Storage) AbortMultipartUpload(uploadID string) error {
 	delete(s.uploads, uploadID)
 	s.mu.Unlock()
 	_ = s.persistUploads()
-	_ = os.RemoveAll(s.multipartDir(uploadID))
+	_ = os.RemoveAll(s.MultipartDir(uploadID))
 	return nil
 }
 
@@ -296,7 +296,7 @@ func (s *Storage) CompleteMultipartUpload(uploadID string, parts []CompletePart)
 	delete(s.uploads, uploadID)
 	s.mu.Unlock()
 	_ = s.persistUploads()
-	_ = os.RemoveAll(s.multipartDir(uploadID))
+	_ = os.RemoveAll(s.MultipartDir(uploadID))
 	return meta, nil
 }
 

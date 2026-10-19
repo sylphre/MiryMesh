@@ -20,7 +20,7 @@ import (
 // auth and AccessKey management.
 type Handler struct {
 	registry   *datanode.Registry
-	storage    *s3api.Storage
+	storage    s3api.ObjectStore
 	resolver   *placement.Resolver
 	jobs       *replication.Store
 	adminToken string
@@ -29,12 +29,12 @@ type Handler struct {
 }
 
 // New creates a Handler.
-func New(reg *datanode.Registry, storage *s3api.Storage, resolver *placement.Resolver, jobs *replication.Store, adminToken string) *Handler {
+func New(reg *datanode.Registry, storage s3api.ObjectStore, resolver *placement.Resolver, jobs *replication.Store, adminToken string) *Handler {
 	return NewWithSetup(reg, storage, resolver, jobs, adminToken, nil, nil)
 }
 
 // NewWithSetup creates a Handler with optional setup/auth stores.
-func NewWithSetup(reg *datanode.Registry, storage *s3api.Storage, resolver *placement.Resolver, jobs *replication.Store, adminToken string, setup *SetupStore, authStore *auth.Store) *Handler {
+func NewWithSetup(reg *datanode.Registry, storage s3api.ObjectStore, resolver *placement.Resolver, jobs *replication.Store, adminToken string, setup *SetupStore, authStore *auth.Store) *Handler {
 	if jobs == nil {
 		jobs = replication.NewStore()
 	}
