@@ -136,24 +136,32 @@ func TestE2E_P0(t *testing.T) {
 
 func TestE2E_SigV4_Variants(t *testing.T) {
 	router, astore, signer := newE2E(t)
-	// Unsigned payload
-	dir := t.TempDir()
-	_ = dir
-	u, _ := url.Parse("http://example.com/bkt/k")
+	// Unsigned payload: PUT to a bucket via SigV4 with UNSIGNED-PAYLOAD.
+	// Use e2e-bkt consistent with TestE2E_P0 bucket naming.
+	// Ensure bucket exists first.
+	createReq := signedPut(t, signer, "PUT", "http://example.com/e2e-bkt2", nil)
+	rrCreate := doE2E(router, astore, createReq)
+	if rrCreate.Code != http.StatusOK {
+		t.Fatalf("CreateBucket for UNSIGNED-PAYLOAD test %d %s", rrCreate.Code, rrCreate.Body.String())
+	}
+	u, _ := url.Parse("http://example.com/e2e-bkt2/k")
 	req := &http.Request{Method: "PUT", URL: u, Header: http.Header{}, Host: "example.com", Body: io.NopCloser(bytes.NewReader([]byte("x")))}
 	now := time.Now().UTC().Format("20060102T150405Z")
 	signer.Sign(req, now, "UNSIGNED-PAYLOAD")
 	req.Body = io.NopCloser(bytes.NewReader([]byte("x")))
+	req.ContentLength = 1
 	rr := doE2E(router, astore, req)
-	_ = rr
+	if rr.Code != http.StatusOK {
+		t.Fatalf("UNSIGNED-PAYLOAD PUT %d %s", rr.Code, rr.Body.String())
+	}
 	// Presigned
 	client := sigv4.Signer{AccessKey: "TESTKEY", SecretKey: "testsecret12345", Region: "us-east-1", Service: "s3"}
 	st, _ := s3api.NewStorage(t.TempDir())
-	_ = st.CreateBucket("bkt")
-	_, _ = st.PutObject("bkt", "hello.txt", "text/plain", nil, strings.NewReader("presigned"))
+	_ = st.CreateBucket("e2e-bkt2")
+	_, _ = st.PutObject("e2e-bkt2", "hello.txt", "text/plain", nil, strings.NewReader("presigned"))
 	router2 := s3api.NewRouter(st, "us-east-1")
 	now2 := time.Now().UTC().Format("20060102T150405Z")
-	u2, _ := url.Parse("http://example.com/bkt/hello.txt")
+	u2, _ := url.Parse("http://example.com/e2e-bkt2/hello.txt")
 	req2 := &http.Request{Method: "GET", URL: u2, Header: http.Header{}, Host: "example.com"}
 	client.Presign(req2, now2, 3600)
 	rr2 := httptest.NewRecorder()
