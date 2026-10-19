@@ -9,7 +9,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
+
+	"github.com/sylphre/MiryMesh/internal/admin"
+	"github.com/sylphre/MiryMesh/internal/replication"
 
 	"github.com/sylphre/MiryMesh/internal/auth"
 	"github.com/sylphre/MiryMesh/internal/config"
@@ -65,9 +69,29 @@ func main() {
 	internalMux := http.NewServeMux()
 	dnHandler.RegisterRoutes(internalMux)
 
+	jobsStore := replication.NewStore()
+	adminHandler := admin.New(reg, store, resolver, jobsStore, internalToken)
+	adminMux := http.NewServeMux()
+	adminHandler.RegisterRoutes(adminMux)
+
+	staticDir := resolveStaticDir()
+	staticFS := http.FileServer(http.Dir(staticDir))
+
 	mux := http.NewServeMux()
+	mux.Handle("/api/admin/", adminMux)
 	mux.Handle("/internal/", internalMux)
-	mux.Handle("/", s3api.AuthMiddleware(authStore, s3Router))
+	mux.Handle("/static/", http.StripPrefix("/static/", staticFS))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// GUI entry lives at /static/index.html and /admin; root "/" is S3 ListBuckets.
+		// Only redirect browser hits that explicitly accept text/html to the GUI.
+		if r.URL.Path == "/" && r.Header.Get("Authorization") == "" && r.URL.Query().Get("X-Amz-Algorithm") == "" {
+			if contains(r.Header.Get("Accept"), "text/html") {
+				http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
+				return
+			}
+		}
+		s3api.AuthMiddleware(authStore, s3Router).ServeHTTP(w, r)
+	})
 
 	go func() {
 		ticker := time.NewTicker(reg.HeartbeatInterval())
@@ -92,4 +116,24 @@ func main() {
 		fmt.Fprintf(os.Stderr, "controller: listen: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func contains(s, sub string) bool { return len(s) >= len(sub) && indexOf(s, sub) >= 0 }
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
+func resolveStaticDir() string {
+	for _, c := range []string{"web/static", "./web/static", "/usr/share/mirymesh/static"} {
+		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
+			return c
+		}
+	}
+	return "web/static"
 }

@@ -1,0 +1,51 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. */
+/* Reset + base typography. No tokens, no components. */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-fg);
+  background: var(--color-bg);
+  line-height: 1.7;
+  letter-spacing: 0.04em;
+  word-break: keep-all;
+  line-break: strict;
+  overflow-wrap: break-word;
+  font-feature-settings: "palt" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--color-primary);
+}
+
+a:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Tables: use class .table for explicit opt-in; keep element fallback minimal. */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+}
+
+.table__head {
+  font-weight: 600;
+  color: var(--color-muted);
+}

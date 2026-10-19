@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+[Unit]
+Description=MiryMesh Data Node
+After=network.target
+
+[Service]
+Type=simple
+User=mirymesh
+Group=mirymesh
+ExecStart=/usr/bin/mirymesh-datanode /etc/mirymesh/config.yaml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/mirymesh /var/log/mirymesh
+
+[Install]
+WantedBy=multi-user.target

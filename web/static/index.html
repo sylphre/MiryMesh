@@ -1,0 +1,39 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. -->
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MiryMesh — Dashboard</title>
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/layout.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="topbar__title">MiryMesh S3</h1>
+    <nav class="topbar__nav">
+      <a href="/static/index.html" class="topbar__link topbar__link--active">Dashboard</a>
+      <a href="/static/nodes.html" class="topbar__link">Nodes</a>
+      <a href="/static/disks.html" class="topbar__link">Disks</a>
+      <a href="/static/buckets.html" class="topbar__link">Buckets</a>
+      <a href="/static/jobs.html" class="topbar__link">Jobs</a>
+      <a href="/api-doc" class="topbar__link">API Doc</a>
+    </nav>
+  </header>
+  <main class="container">
+    <h2>Dashboard</h2>
+    <div id="cluster" class="card">Loading…</div>
+    <div class="grid">
+      <div class="card"><h3>Nodes</h3><div id="nodes"></div></div>
+      <div class="card"><h3>Buckets</h3><div id="buckets"></div></div>
+      <div class="card"><h3>Jobs</h3><div id="jobs"></div></div>
+    </div>
+  </main>
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script src="/static/js/pages/dashboard.js"></script>
+</body>
+</html>

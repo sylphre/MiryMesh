@@ -191,7 +191,14 @@ func (h *Handler) handleEvacuate(w http.ResponseWriter, r *http.Request) {
 	}
 	snap := req.Snapshot
 	if snap == nil {
-		// Build from registry: we record buckets from disks? For M5 we record node list.
+		// TODO(M5/Phase4): fan-out and authoritative snapshot shape.
+		// - Fan-out: controller's Evacuator.Save should POST the snapshot to each
+		//   datanode's own evacuate endpoint (registry-discovered) so every node
+		//   holds a copy for master takeover (docs/07). M5 only writes locally.
+		// - Shape: this fallback currently mirrors registry nodes into Buckets; the
+		//   authoritative snapshot should be built from s3api.Storage (buckets/objects)
+		//   plus PlacementPolicies and Auth credentials (docs/05/07). Wire bucket/object
+		//   enumeration + policy/auth evacuation in Phase4.
 		snap = &metadata.EvacuationSnapshot{Buckets: []string{}}
 		for _, n := range h.registry.ListNodes() {
 			snap.Buckets = append(snap.Buckets, n.ID)
@@ -210,6 +217,11 @@ func (h *Handler) handleRestore(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// TODO(M5/Phase4): adoption mode — new master on startup should auto-call
+	// metadata.LoadAny(localDir, remoteDirs...) then Restorer.Restore to adopt
+	// evacuated state (docs/07). Wire this into cmd/controller startup sequence.
+	// TODO(M5/Phase4): PlacementPolicies/Auth evacuation — extend EvacuationSnapshot
+	// to include placement policies and access keys so GUI restore is complete.
 	dir := h.evacDir
 	if dir == "" {
 		dir = os.TempDir()

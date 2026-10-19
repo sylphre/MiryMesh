@@ -1,0 +1,114 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. */
+/* ── Card ── */
+/* ── Card ── */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+}
+
+/* ── Button ── */
+.btn {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.btn:hover {
+  border-color: var(--color-muted);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn--primary {
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+  border-color: var(--color-primary);
+}
+
+.btn--primary:hover {
+  filter: brightness(1.05);
+}
+
+.btn--primary:focus-visible {
+  outline-color: var(--color-primary);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── Input ── */
+.input {
+  padding: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.form {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+/* ── Badge ── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  background: var(--color-soft);
+}
+
+.badge--online {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.badge--offline {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+}
+
+/* ── States (docs/09) ── */
+.state--loading {
+  color: var(--color-muted);
+}
+
+.state--error {
+  color: var(--color-error);
+}
+
+.state--empty {
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+.state--success {
+  color: var(--color-success);
+}
+
+/* ── Table (BEM, flat specificity) ── */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}

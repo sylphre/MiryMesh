@@ -1,0 +1,26 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. */
+/* Tokens only: :root. No resets, no element selectors. */
+:root {
+  --color-bg: #fafaf9;
+  --color-fg: #1c1917;
+  --color-muted: #78716c;
+  --color-border: #e7e5e4;
+  --color-surface: #ffffff;
+  --color-soft: #e7e5e4;
+  --color-primary: #0c4a6e;
+  --color-primary-contrast: #f8fafc;
+  --color-success: #14532d;
+  --color-success-bg: #dcfce7;
+  --color-warning: #7c2d12;
+  --color-error: #991b1b;
+  --color-error-bg: #fee2e2;
+  --radius: 8px;
+  --radius-pill: 999px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --font-sans: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", monospace;
+}
