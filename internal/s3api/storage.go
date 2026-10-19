@@ -38,10 +38,8 @@ type Storage struct {
 	buckets map[string]struct{}
 	// meta cache: bucket -> key -> meta
 	meta map[string]map[string]ObjectMeta
-	// multipart in-progress uploads: uploadID -> upload
+	// multipart in-progress uploads: uploadID -> upload (persisted to disk)
 	uploads map[string]*MultipartUploadState
-	// TODO: persist uploads map for interrupted-job recovery (docs/07).
-	// See replication.Store Persist/Load — apply same pattern to multipart.
 }
 
 // MultipartUploadState holds in-progress multipart state (M6).
@@ -91,6 +89,7 @@ func NewStorage(root string) (*Storage, error) {
 			s.meta[e.Name()] = make(map[string]ObjectMeta)
 		}
 	}
+	_ = s.loadUploads()
 	return s, nil
 }
 
@@ -236,33 +235,44 @@ func (s *Storage) PutObject(bucket, key string, contentType string, meta map[str
 	if strings.TrimSpace(key) == "" {
 		return ObjectMeta{}, errInvalidRequest
 	}
-	// TODO(M2+): stream via io.TeeReader + hash.Hash to avoid holding up to
-	// 5GiB in memory. Current io.ReadAll is M1 simplification — see M1-review #2.
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return ObjectMeta{}, err
-	}
-	sum := md5.Sum(data)
-	etag := hex.EncodeToString(sum[:])
-	now := time.Now().UTC()
-	ct := contentType
-	if ct == "" {
-		ct = "application/octet-stream"
-	}
 	dest := s.objectPath(bucket, key)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return ObjectMeta{}, err
 	}
-	// Atomic write via temp file.
-	tmp := dest + ".tmp-" + etag
-	if err := os.WriteFile(tmp, data, 0o640); err != nil {
+	// Stream to temp file while computing md5 (avoids holding 5GiB in memory).
+	ct := contentType
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	tmp := dest + ".tmp-put"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if err != nil {
 		return ObjectMeta{}, err
 	}
-	if err := os.Rename(tmp, dest); err != nil {
+	h := md5.New()
+	size, err := io.Copy(io.MultiWriter(f, h), r)
+	if err != nil {
+		_ = f.Close()
 		_ = os.Remove(tmp)
 		return ObjectMeta{}, err
 	}
-	m := ObjectMeta{Key: key, Size: int64(len(data)), ETag: etag, ContentType: ct, LastMod: now, Meta: cloneMeta(meta)}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return ObjectMeta{}, err
+	}
+	etag := hex.EncodeToString(h.Sum(nil))
+	finalTmp := dest + ".tmp-" + etag
+	if err := os.Rename(tmp, finalTmp); err != nil {
+		_ = os.Remove(tmp)
+		return ObjectMeta{}, err
+	}
+	if err := os.Rename(finalTmp, dest); err != nil {
+		_ = os.Remove(finalTmp)
+		_ = os.Remove(tmp)
+		return ObjectMeta{}, err
+	}
+	now := time.Now().UTC()
+	m := ObjectMeta{Key: key, Size: size, ETag: etag, ContentType: ct, LastMod: now, Meta: cloneMeta(meta)}
 	s.mu.Lock()
 	if s.meta[bucket] == nil {
 		s.meta[bucket] = make(map[string]ObjectMeta)

@@ -7,6 +7,7 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,54 @@ import (
 	"strings"
 	"time"
 )
+
+// uploadIndexPath returns path to the multipart index JSON file.
+func (s *Storage) uploadIndexPath() string { return filepath.Join(s.multipartBase(), "uploads.json") }
+
+// persistUploads writes the uploads map to disk atomically.
+func (s *Storage) persistUploads() error {
+	if err := os.MkdirAll(s.multipartBase(), 0o750); err != nil {
+		return err
+	}
+	s.mu.RLock()
+	data, err := json.Marshal(s.uploads)
+	s.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	tmp := s.uploadIndexPath() + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o640); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.uploadIndexPath())
+}
+
+// loadUploads restores uploads from disk.
+func (s *Storage) loadUploads() error {
+	data, err := os.ReadFile(s.uploadIndexPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var m map[string]*MultipartUploadState
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.uploads == nil {
+		s.uploads = make(map[string]*MultipartUploadState)
+	}
+	for k, v := range m {
+		// Only restore if multipart dir still exists (parts not cleaned)
+		if _, err := os.Stat(s.multipartDir(k)); err == nil {
+			s.uploads[k] = v
+		}
+	}
+	s.mu.Unlock()
+	return nil
+}
 
 func (s *Storage) multipartBase() string { return filepath.Join(s.root, ".multipart") }
 func (s *Storage) multipartDir(uploadID string) string {
@@ -56,6 +105,7 @@ func (s *Storage) CreateMultipartUpload(bucket, key, contentType string, meta ma
 	s.mu.Lock()
 	s.uploads[uploadID] = st
 	s.mu.Unlock()
+	_ = s.persistUploads()
 	return st, nil
 }
 
@@ -70,26 +120,34 @@ func (s *Storage) UploadPart(uploadID string, partNumber int, r io.Reader) (Part
 	if !ok {
 		return PartRecord{}, APIError{Code: "NoSuchUpload", Message: "The specified upload does not exist", Status: 404}
 	}
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return PartRecord{}, err
-	}
-	sum := md5.Sum(data)
-	etag := hex.EncodeToString(sum[:])
 	dir := s.multipartDir(uploadID)
 	path := filepath.Join(dir, fmt.Sprintf("part-%05d", partNumber))
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o640); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if err != nil {
 		return PartRecord{}, err
 	}
+	h := md5.New()
+	size, err := io.Copy(io.MultiWriter(f, h), r)
+	if err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return PartRecord{}, err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return PartRecord{}, err
+	}
+	etag := hex.EncodeToString(h.Sum(nil))
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return PartRecord{}, err
 	}
-	rec := PartRecord{PartNumber: partNumber, ETag: etag, Size: int64(len(data)), LastMod: time.Now().UTC(), Path: path}
+	rec := PartRecord{PartNumber: partNumber, ETag: etag, Size: size, LastMod: time.Now().UTC(), Path: path}
 	s.mu.Lock()
 	st.Parts[partNumber] = rec
 	s.mu.Unlock()
+	_ = s.persistUploads()
 	return rec, nil
 }
 
@@ -150,13 +208,12 @@ func (s *Storage) AbortMultipartUpload(uploadID string) error {
 	}
 	delete(s.uploads, uploadID)
 	s.mu.Unlock()
+	_ = s.persistUploads()
 	_ = os.RemoveAll(s.multipartDir(uploadID))
 	return nil
 }
 
 // CompleteMultipartUpload assembles parts into the final object.
-// TODO(M7+): stream via io.Copy (file concatenation) to avoid holding
-// assembled in memory (5GiB). Current append is M6 simplification.
 func (s *Storage) CompleteMultipartUpload(uploadID string, parts []CompletePart) (ObjectMeta, error) {
 	s.mu.RLock()
 	st, ok := s.uploads[uploadID]
@@ -170,49 +227,67 @@ func (s *Storage) CompleteMultipartUpload(uploadID string, parts []CompletePart)
 	if len(st.Parts) == 0 {
 		return ObjectMeta{}, APIError{Code: "InvalidRequest", Message: "No parts uploaded", Status: 400}
 	}
-	// Validate each part's ETag matches stored.
-	var assembled []byte
+	// Validate ETags and compute final multipart ETag (hex(md5(concat md5s))-N).
+	var partPaths []string
 	var partETags [][]byte
 	for _, p := range parts {
 		rec, ok := st.Parts[p.PartNumber]
 		if !ok {
 			return ObjectMeta{}, APIError{Code: "InvalidPart", Message: fmt.Sprintf("Part %d not found", p.PartNumber), Status: 400}
 		}
-		// Normalize ETag (strip quotes, lower).
 		want := strings.Trim(strings.ToLower(p.ETag), "\"")
 		if strings.ToLower(rec.ETag) != want {
 			return ObjectMeta{}, APIError{Code: "InvalidPart", Message: fmt.Sprintf("ETag mismatch for part %d", p.PartNumber), Status: 400}
 		}
-		data, err := os.ReadFile(rec.Path)
-		if err != nil {
+		if _, err := os.Stat(rec.Path); err != nil {
 			return ObjectMeta{}, err
 		}
-		assembled = append(assembled, data...)
+		partPaths = append(partPaths, rec.Path)
 		etagBytes, _ := hex.DecodeString(rec.ETag)
 		partETags = append(partETags, etagBytes)
 	}
-	// S3 multipart ETag is hex(md5(concat(md5_parts))) + "-" + count
-	// Compute for compatibility.
 	concat := make([]byte, 0, len(partETags)*16)
 	for _, b := range partETags {
 		concat = append(concat, b...)
 	}
 	finalMD5 := md5.Sum(concat)
 	finalETag := fmt.Sprintf("%s-%d", hex.EncodeToString(finalMD5[:]), len(parts))
-	// Write final object via PutObject helper (avoid double read).
+	// Stream concat parts to final object file (no in-memory assembled).
 	dest := s.objectPath(st.Bucket, st.Key)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return ObjectMeta{}, err
 	}
 	tmp := dest + ".tmp-" + finalETag
-	if err := os.WriteFile(tmp, assembled, 0o640); err != nil {
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if err != nil {
+		return ObjectMeta{}, err
+	}
+	var total int64
+	for _, path := range partPaths {
+		f, err := os.Open(path)
+		if err != nil {
+			_ = out.Close()
+			_ = os.Remove(tmp)
+			return ObjectMeta{}, err
+		}
+		n, err := io.Copy(out, f)
+		_ = f.Close()
+		if err != nil {
+			_ = out.Close()
+			_ = os.Remove(tmp)
+			return ObjectMeta{}, err
+		}
+		total += n
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(tmp)
 		return ObjectMeta{}, err
 	}
 	if err := os.Rename(tmp, dest); err != nil {
 		_ = os.Remove(tmp)
 		return ObjectMeta{}, err
 	}
-	meta := ObjectMeta{Key: st.Key, Size: int64(len(assembled)), ETag: finalETag, ContentType: st.ContentType, LastMod: time.Now().UTC(), Meta: cloneMeta(st.Meta)}
+	meta := ObjectMeta{Key: st.Key, Size: total, ETag: finalETag, ContentType: st.ContentType, LastMod: time.Now().UTC(), Meta: cloneMeta(st.Meta)}
 	s.mu.Lock()
 	if s.meta[st.Bucket] == nil {
 		s.meta[st.Bucket] = make(map[string]ObjectMeta)
@@ -220,6 +295,7 @@ func (s *Storage) CompleteMultipartUpload(uploadID string, parts []CompletePart)
 	s.meta[st.Bucket][st.Key] = meta
 	delete(s.uploads, uploadID)
 	s.mu.Unlock()
+	_ = s.persistUploads()
 	_ = os.RemoveAll(s.multipartDir(uploadID))
 	return meta, nil
 }

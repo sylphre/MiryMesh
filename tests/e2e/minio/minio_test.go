@@ -6,4 +6,5 @@
 package minio_test
 
 import "testing"
+
 func TestMinio_Placeholder(t *testing.T) { t.Log("mc/rclone e2e — run with -tags=e2e_external") }

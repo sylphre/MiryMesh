@@ -7,8 +7,6 @@ import (
 	"encoding/xml"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -49,14 +47,6 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 			return
 		}
 	}
-	// TODO(M8+): streaming CopyObject via io.Copy / PutObject stream to avoid
-	// holding up to 5GiB in memory (double copy + string cast). Replace
-	// ReadAll + string(data) with streaming path similar to multipart TODO.
-	data, err3 := io.ReadAll(rc)
-	if err3 != nil {
-		writeXMLError(w, r, 500, "InternalError", err3.Error())
-		return
-	}
 	// Metadata directive: COPY (default) or REPLACE.
 	directive := strings.ToUpper(r.Header.Get("x-amz-metadata-directive"))
 	if directive == "" {
@@ -80,34 +70,23 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 		writeError(w, r, errInvalidRequest)
 		return
 	}
-	// Validate placement for dest
+	// Stream copy: validate placement using src size, then stream via PutObject.
 	if rt.placing != nil {
-		size := int64(len(data))
-		if _, pErr := rt.placing.Resolve(destBucket, size); pErr != nil {
+		if _, pErr := rt.placing.Resolve(destBucket, srcMeta.Size); pErr != nil {
 			writeError(w, r, APIError{Code: errInsufficient.Code, Message: pErr.Error(), Status: 507})
 			return
 		}
 	} else {
-		if int64(len(data)) > 0 && rt.store.IsOverQuota(int64(len(data))) {
+		if srcMeta.Size > 0 && rt.store.IsOverQuota(srcMeta.Size) {
 			writeError(w, r, errInsufficient)
 			return
 		}
 	}
-	// Write dest object (reuse PutObject path for ETag/meta)
-	// Use temp file style via storage's internal objectPath — mimic PutObject but avoid double read.
-	// Direct write:
-	destPath := rt.store.objectPath(destBucket, destKey)
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o750); err != nil {
-		writeXMLError(w, r, 500, "InternalError", err.Error())
-		return
-	}
-	// Use PutObject for consistency (handles ETag + meta cache).
-	// We already have data, so call via reader.
 	ct := dstCT
 	if ct == "" {
 		ct = "application/octet-stream"
 	}
-	m, err4 := rt.store.PutObject(destBucket, destKey, ct, dstMeta, strings.NewReader(string(data))) // TODO: streaming, avoid string copy
+	m, err4 := rt.store.PutObject(destBucket, destKey, ct, dstMeta, rc)
 	if err4 != nil {
 		if apiErr, ok := err4.(APIError); ok {
 			writeError(w, r, apiErr)

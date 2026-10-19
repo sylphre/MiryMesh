@@ -64,7 +64,8 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 			return
 		}
 	}
-	// Range: x-amz-copy-source-range: bytes=start-end
+	// For range, get size before reading all; validate then slice.
+	// TODO: streaming range copy without full ReadAll for large sources.
 	srcData, err3 := io.ReadAll(rc)
 	if err3 != nil {
 		writeXMLError(w, r, 500, "InternalError", err3.Error())
@@ -82,20 +83,32 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		}
 		srcData = srcData[start : end+1]
 	}
-	// Write part file
+	// Write part file via streaming hash (already have srcData but keep streaming path for consistency).
 	dir := rt.store.multipartDir(uploadID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		writeXMLError(w, r, 500, "InternalError", err.Error())
 		return
 	}
-	sum := md5.Sum(srcData)
-	etag := hex.EncodeToString(sum[:])
 	path := filepath.Join(dir, fmt.Sprintf("part-%05d", partNumber))
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, srcData, 0o640); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if err != nil {
 		writeXMLError(w, r, 500, "InternalError", err.Error())
 		return
 	}
+	h := md5.New()
+	if _, err := io.Copy(io.MultiWriter(f, h), strings.NewReader(string(srcData))); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		writeXMLError(w, r, 500, "InternalError", err.Error())
+		return
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		writeXMLError(w, r, 500, "InternalError", err.Error())
+		return
+	}
+	etag := hex.EncodeToString(h.Sum(nil))
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		writeXMLError(w, r, 500, "InternalError", err.Error())

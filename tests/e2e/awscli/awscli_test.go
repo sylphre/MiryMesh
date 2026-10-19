@@ -6,4 +6,5 @@
 package awscli_test
 
 import "testing"
+
 func TestAWSCLI_Placeholder(t *testing.T) { t.Log("awscli e2e — run with -tags=e2e_external") }
