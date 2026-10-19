@@ -48,7 +48,7 @@ type DBConfig struct {
 type DatanodeConfig struct {
 	ControllerURL string   `yaml:"controller_url"`
 	Paths         []string `yaml:"paths"`
-	Listen        string   `yaml:"listen"` // DataNode listen, default "0.0.0.0:9002" (Tailscale 100.114.64.41:9002)
+	Listen        string   `yaml:"listen"` // DataNode listen, default "0.0.0.0:9002" (Tailscale <tailscale-ip>:9002)
 }
 
 // StorageConfig holds replication / placement settings for controller.

@@ -75,7 +75,7 @@ func main() {
 		listen = "0.0.0.0:9002"
 	}
 	go func() {
-		slog.Info("datanode: listening", "addr", listen, "hint", "0.0.0.0:9002 on Tailscale 100.114.64.41:9002; do not expose to public, keep behind firewall/Tailscale ACL")
+		slog.Info("datanode: listening", "addr", listen, "hint", "0.0.0.0:9002 on Tailscale <tailscale-ip>:9002; do not expose to public, keep behind firewall/Tailscale ACL")
 		if err := http.ListenAndServe(listen, mux); err != nil {
 			slog.Error("datanode: listen failed", "err", err)
 		}

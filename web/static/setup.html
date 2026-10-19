@@ -87,7 +87,7 @@
     step1.style.display = "";
     step1.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const data = { username: step1.elements.username.value, password: step1.elements.password.value, access_key: "TMPKEY", secret_key: "tmpsecret12345" };
+      const data = { username: step1.elements.username.value, password: step1.elements.password.value };
       try {
         const res = await fetch("/api/admin/setup", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(data) });
         if (!res.ok) throw new Error(await res.text());

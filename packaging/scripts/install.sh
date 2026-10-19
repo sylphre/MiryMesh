@@ -298,16 +298,16 @@ if command -v systemctl >/dev/null 2>&1; then
     if curl -sf http://127.0.0.1:9001/api/admin/setup/status >/dev/null 2>&1; then log "Controller up (9001/setup/status ok)"; else log "Controller not yet up — check journalctl -u mirymesh-controller -n 20"; journalctl -u mirymesh-controller -n 20 2>/dev/null | head -20 || true; fi
   fi
   if [ "$ROLE" = "master" ]; then
-    log "To start Master: sudo systemctl enable --now mirymesh-controller && xdg-open http://127.0.0.1:9000/  # setup redirects to http://127.0.0.1:9001/static/setup.html (S3 0.0.0.0:9000 / Admin 0.0.0.0:9001, Tailscale 100.114.64.41:900x, firewall/Tailscale ACL required)"
-    log "Setup:    Master 初回はブラウザで http://100.114.64.41:9001/static/setup.html または http://127.0.0.1:9001/static/setup.html で AccessKey/Secret/Policy を入力 (Token は localStorage に保存, 0.0.0.0:9001 は public に晒さない)"
+    log "To start Master: sudo systemctl enable --now mirymesh-controller && xdg-open http://127.0.0.1:9000/  # setup redirects to http://127.0.0.1:9001/static/setup.html (S3 0.0.0.0:9000 / Admin 0.0.0.0:9001, Tailscale <tailscale-ip>:900x, firewall/Tailscale ACL required)"
+    log "Setup:    Master 初回はブラウザで http://<tailscale-ip>:9001/static/setup.html または http://127.0.0.1:9001/static/setup.html で AccessKey/Secret/Policy を入力 (Token は localStorage に保存, 0.0.0.0:9001 は public に晒さない)"
     log "Status:   systemctl status mirymesh-controller; journalctl -u mirymesh-controller -f"
-    log "Health:   curl -f http://127.0.0.1:9000/healthz                          # S3 0.0.0.0:9000 (Tailscale 100.114.64.41:9000)"
-    log "Admin:    curl -H \"X-Admin-Token: \$TOKEN\" http://127.0.0.1:9001/api/admin/health  # Admin 0.0.0.0:9001 (Tailscale 100.114.64.41:9001, firewall required)"
+    log "Health:   curl -f http://127.0.0.1:9000/healthz                          # S3 0.0.0.0:9000 (Tailscale <tailscale-ip>:9000)"
+    log "Admin:    curl -H \"X-Admin-Token: \$TOKEN\" http://127.0.0.1:9001/api/admin/health  # Admin 0.0.0.0:9001 (Tailscale <tailscale-ip>:9001, firewall required)"
   else
     log "To start Client: sudo systemctl enable --now mirymesh-datanode"
     log "Status:   systemctl status mirymesh-datanode; journalctl -u mirymesh-datanode -f"
-    log "Check Master: curl -H \"X-Admin-Token: \$TOKEN\" http://100.114.64.41:9001/api/admin/nodes  # from Tailscale or 127.0.0.1:9001 (admin 0.0.0.0:9001)"
-    log "DataNode: listen 0.0.0.0:9002 (Tailscale 100.114.64.41:9002), firewall/Tailscale ACL required"
+    log "Check Master: curl -H \"X-Admin-Token: \$TOKEN\" http://<tailscale-ip>:9001/api/admin/nodes  # from Tailscale or 127.0.0.1:9001 (admin 0.0.0.0:9001)"
+    log "DataNode: listen 0.0.0.0:9002 (Tailscale <tailscale-ip>:9002), firewall/Tailscale ACL required"
   fi
 else
   if [ "$ROLE" = "master" ]; then

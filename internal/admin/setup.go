@@ -278,9 +278,13 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "password must be at least 8 chars", http.StatusBadRequest)
 			return
 		}
-		if err := validateSetupInput(req.AccessKey, req.SecretKey, req.DefaultPolicy); err != nil {
-			http.Error(w, err.Error(), asStatus(err))
-			return
+		// Step1 (Admin creation) may omit AccessKey/SecretKey — they come in Step2 via login + S3 config.
+		// Only validate AK/SK if at least one is non-empty.
+		if strings.TrimSpace(req.AccessKey) != "" || strings.TrimSpace(req.SecretKey) != "" {
+			if err := validateSetupInput(req.AccessKey, req.SecretKey, req.DefaultPolicy); err != nil {
+				http.Error(w, err.Error(), asStatus(err))
+				return
+			}
 		}
 		policy := req.DefaultPolicy
 		if policy == "" {
