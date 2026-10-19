@@ -5,8 +5,12 @@ package datanode
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
+
+	"github.com/sylphre/MiryMesh/internal/metadata"
 )
 
 // Handler serves controller-side internal API for datanode registration,
@@ -16,11 +20,18 @@ type Handler struct {
 	// token is the shared registration token for M2 (single static token).
 	// TODO: replace with GUI-issued one-time tokens (M4+). See M2-review #2.
 	token string
+	// evacDir is the controller-side evacuation dir for backup/restore (M5).
+	evacDir string
 }
 
 // NewHandler creates a Handler.
 func NewHandler(reg *Registry, token string) *Handler {
 	return &Handler{registry: reg, token: token}
+}
+
+// NewHandlerWithEvacDir creates a Handler with evacuation dir.
+func NewHandlerWithEvacDir(reg *Registry, token, evacDir string) *Handler {
+	return &Handler{registry: reg, token: token, evacDir: evacDir}
 }
 
 // RegisterRoutes mounts /internal/* endpoints on mux.
@@ -29,6 +40,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/internal/heartbeat", h.handleHeartbeat)
 	mux.HandleFunc("/internal/disks", h.handleDisks)
 	mux.HandleFunc("/internal/nodes", h.handleListNodes)
+	mux.HandleFunc("/internal/evacuate", h.handleEvacuate)
+	mux.HandleFunc("/internal/restore", h.handleRestore)
 }
 
 type registerReq struct {
@@ -147,4 +160,65 @@ func (h *Handler) handleListNodes(w http.ResponseWriter, _ *http.Request) {
 	nodes := h.registry.ListNodes()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"nodes": nodes})
+}
+
+func (h *Handler) handleEvacuate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Token string `json:"token"`
+		// Snapshot payload: if empty, evacuates current registry snapshot.
+		Snapshot *metadata.EvacuationSnapshot `json:"snapshot,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if h.token != "" && req.Token != h.token {
+		http.Error(w, "invalid token", http.StatusForbidden)
+		return
+	}
+	dir := h.evacDir
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	ev, err := metadata.NewEvacuator(dir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	snap := req.Snapshot
+	if snap == nil {
+		// Build from registry: we record buckets from disks? For M5 we record node list.
+		snap = &metadata.EvacuationSnapshot{Buckets: []string{}}
+		for _, n := range h.registry.ListNodes() {
+			snap.Buckets = append(snap.Buckets, n.ID)
+		}
+	}
+	if err := ev.Save(snap); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "version": snap.Version})
+}
+
+func (h *Handler) handleRestore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	dir := h.evacDir
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	snap, err := metadata.LoadAny(dir, nil)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("no snapshot: %v", err), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(snap)
 }
