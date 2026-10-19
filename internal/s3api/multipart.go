@@ -155,6 +155,8 @@ func (s *Storage) AbortMultipartUpload(uploadID string) error {
 }
 
 // CompleteMultipartUpload assembles parts into the final object.
+// TODO(M7+): stream via io.Copy (file concatenation) to avoid holding
+// assembled in memory (5GiB). Current append is M6 simplification.
 func (s *Storage) CompleteMultipartUpload(uploadID string, parts []CompletePart) (ObjectMeta, error) {
 	s.mu.RLock()
 	st, ok := s.uploads[uploadID]

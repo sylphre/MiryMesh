@@ -7,7 +7,6 @@ import (
 	"encoding/xml"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -117,8 +116,6 @@ func (rt *Router) handleListParts(w http.ResponseWriter, r *http.Request, bucket
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(200)
 	_ = xml.NewEncoder(w).Encode(resp{Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/", Bucket: bucket, Key: key, UploadID: uploadID, Parts: pxml})
-	_ = url.QueryEscape
-	_ = io.Copy
 }
 
 func (rt *Router) handleAbortMultipart(w http.ResponseWriter, r *http.Request, bucket, key string) {
@@ -137,8 +134,6 @@ func (rt *Router) handleAbortMultipart(w http.ResponseWriter, r *http.Request, b
 		return
 	}
 	w.WriteHeader(204)
-	_ = bucket
-	_ = key
 }
 
 func (rt *Router) handleCompleteMultipart(w http.ResponseWriter, r *http.Request, bucket, key string) {

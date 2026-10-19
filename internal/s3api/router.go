@@ -107,6 +107,10 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				writeError(w, r, errInvalidRequest)
 				return
 			}
+			if q.Has("delete") {
+				rt.handleDeleteObjects(w, r, bucket)
+				return
+			}
 		}
 	}
 
@@ -141,9 +145,13 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rt.handleGetObject(w, r, bucket, key)
 			return
 		case http.MethodPut:
-			// CopyObject is PUT with x-amz-copy-source.
 			if r.Header.Get("X-Amz-Copy-Source") != "" || r.Header.Get("x-amz-copy-source") != "" {
-				writeError(w, r, errNotImplemented)
+				// UploadPartCopy (PUT with uploadId+partNumber+copy-source) stays 501 in M7.
+				if q.Has("uploadId") && q.Has("partNumber") {
+					writeError(w, r, errNotImplemented)
+					return
+				}
+				rt.handleCopyObject(w, r, bucket, key)
 				return
 			}
 			rt.handlePutObject(w, r, bucket, key)
@@ -157,9 +165,20 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				rt.handleCreateMultipartUpload(w, r, bucket, key)
 				return
 			}
+			if q.Has("delete") {
+				// POST /{bucket}?delete is bucket-level, but some clients send it here; handle as DeleteObjects
+				rt.handleDeleteObjects(w, r, bucket)
+				return
+			}
 			writeXMLError(w, r, http.StatusNotImplemented, "NotImplemented", "operation is not implemented")
 			return
 		}
+	}
+
+	// Bucket-level POST ?delete fallback (e.g. POST /?delete without key)
+	if q.Has("delete") && r.Method == http.MethodPost {
+		rt.handleDeleteObjects(w, r, bucket)
+		return
 	}
 
 	writeXMLError(w, r, http.StatusNotImplemented, "NotImplemented", "operation is not implemented")

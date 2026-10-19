@@ -40,6 +40,8 @@ type Storage struct {
 	meta map[string]map[string]ObjectMeta
 	// multipart in-progress uploads: uploadID -> upload
 	uploads map[string]*MultipartUploadState
+	// TODO: persist uploads map for interrupted-job recovery (docs/07).
+	// See replication.Store Persist/Load — apply same pattern to multipart.
 }
 
 // MultipartUploadState holds in-progress multipart state (M6).
