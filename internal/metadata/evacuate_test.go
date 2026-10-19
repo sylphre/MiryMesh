@@ -15,12 +15,12 @@ func TestEvacuatorSaveLoad(t *testing.T) {
 		t.Fatalf("NewEvacuator: %v", err)
 	}
 	snap := &EvacuationSnapshot{Buckets: []string{"bkt"}, Objects: []ObjectRecord{{Bucket: "bkt", Key: "k", Size: 3, ETag: "abc"}}}
-	if err := ev.Save(snap); err != nil {
-		t.Fatalf("Save: %v", err)
+	if saveErr := ev.Save(snap); saveErr != nil {
+		t.Fatalf("Save: %v", saveErr)
 	}
-	loaded, err := ev.Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	loaded, loadErr := ev.Load()
+	if loadErr != nil {
+		t.Fatalf("Load: %v", loadErr)
 	}
 	if len(loaded.Buckets) != 1 || loaded.Buckets[0] != "bkt" {
 		t.Fatalf("buckets=%v", loaded.Buckets)
@@ -32,8 +32,8 @@ func TestEvacuatorSaveLoad(t *testing.T) {
 		t.Fatalf("version=%d", loaded.Version)
 	}
 	// Second save bumps version.
-	if err := ev.Save(snap); err != nil {
-		t.Fatalf("Save2: %v", err)
+	if saveErr2 := ev.Save(snap); saveErr2 != nil {
+		t.Fatalf("Save2: %v", saveErr2)
 	}
 	loaded2, _ := ev.Load()
 	if loaded2.Version != 2 {

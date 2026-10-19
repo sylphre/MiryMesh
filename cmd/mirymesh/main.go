@@ -88,21 +88,21 @@ func runBackup() {
 			}
 			rel, _ := filepath.Rel(bktDir, path)
 			key := filepath.ToSlash(rel)
-			fi, err := d.Info()
-			if err != nil {
+			fi2, infoErr := d.Info()
+			if infoErr != nil {
 				return nil
 			}
-			objects = append(objects, metadata.ObjectRecord{Bucket: e.Name(), Key: key, Size: fi.Size()})
+			objects = append(objects, metadata.ObjectRecord{Bucket: e.Name(), Key: key, Size: fi2.Size()})
 			return nil
 		})
 	}
-	ev, err := metadata.NewEvacuator(dir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "backup: evacuator: %v\n", err)
+	ev2, evacErr := metadata.NewEvacuator(dir)
+	if evacErr != nil {
+		fmt.Fprintf(os.Stderr, "backup: evacuator: %v\n", evacErr)
 		os.Exit(1)
 	}
-	if err := ev.Save(&metadata.EvacuationSnapshot{Buckets: buckets, Objects: objects}); err != nil {
-		fmt.Fprintf(os.Stderr, "backup: save: %v\n", err)
+	if saveErr := ev2.Save(&metadata.EvacuationSnapshot{Buckets: buckets, Objects: objects}); saveErr != nil {
+		fmt.Fprintf(os.Stderr, "backup: save: %v\n", saveErr)
 		os.Exit(1)
 	}
 	slog.Info("backup: evacuation snapshot saved", "dir", dir, "buckets", len(buckets), "objects", len(objects))

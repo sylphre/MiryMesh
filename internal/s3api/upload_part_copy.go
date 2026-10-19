@@ -85,33 +85,33 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 	}
 	// Write part file via streaming hash (already have srcData but keep streaming path for consistency).
 	dir := rt.store.multipartDir(uploadID)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		writeXMLError(w, r, 500, "InternalError", err.Error())
+	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+		writeXMLError(w, r, 500, "InternalError", mkErr.Error())
 		return
 	}
 	path := filepath.Join(dir, fmt.Sprintf("part-%05d", partNumber))
 	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
-	if err != nil {
-		writeXMLError(w, r, 500, "InternalError", err.Error())
+	f, openErr := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if openErr != nil {
+		writeXMLError(w, r, 500, "InternalError", openErr.Error())
 		return
 	}
 	h := md5.New()
-	if _, err := io.Copy(io.MultiWriter(f, h), strings.NewReader(string(srcData))); err != nil {
+	if _, copyErr := io.Copy(io.MultiWriter(f, h), strings.NewReader(string(srcData))); copyErr != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
-		writeXMLError(w, r, 500, "InternalError", err.Error())
+		writeXMLError(w, r, 500, "InternalError", copyErr.Error())
 		return
 	}
-	if err := f.Close(); err != nil {
+	if closeErr := f.Close(); closeErr != nil {
 		_ = os.Remove(tmp)
-		writeXMLError(w, r, 500, "InternalError", err.Error())
+		writeXMLError(w, r, 500, "InternalError", closeErr.Error())
 		return
 	}
 	etag := hex.EncodeToString(h.Sum(nil))
-	if err := os.Rename(tmp, path); err != nil {
+	if renameErr := os.Rename(tmp, path); renameErr != nil {
 		_ = os.Remove(tmp)
-		writeXMLError(w, r, 500, "InternalError", err.Error())
+		writeXMLError(w, r, 500, "InternalError", renameErr.Error())
 		return
 	}
 	rec := PartRecord{PartNumber: partNumber, ETag: etag, Size: int64(len(srcData)), Path: path}

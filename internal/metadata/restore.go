@@ -42,28 +42,28 @@ func (r *Restorer) Restore(snap *EvacuationSnapshot) (*RestoreResult, error) {
 	// Buckets: ensure directories exist.
 	for _, b := range snap.Buckets {
 		dir := filepath.Join(r.storageRoot, b)
-		if _, err := os.Stat(dir); err == nil {
+		if _, statErr := os.Stat(dir); statErr == nil {
 			res.BucketsRestored++
-		} else if os.IsNotExist(err) {
-			if err := os.MkdirAll(dir, 0o750); err != nil {
-				res.Errors = append(res.Errors, fmt.Sprintf("bucket %s: %v", b, err))
+		} else if os.IsNotExist(statErr) {
+			if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+				res.Errors = append(res.Errors, fmt.Sprintf("bucket %s: %v", b, mkErr))
 				continue
 			}
 			res.BucketsCreated++
 		} else {
-			res.Errors = append(res.Errors, fmt.Sprintf("bucket %s stat: %v", b, err))
+			res.Errors = append(res.Errors, fmt.Sprintf("bucket %s stat: %v", b, statErr))
 		}
 	}
 	// Objects: count present vs missing blobs.
 	for _, obj := range snap.Objects {
 		path := filepath.Join(r.storageRoot, obj.Bucket, filepath.FromSlash(obj.Key))
-		if _, err := os.Stat(path); err == nil {
+		if _, statErr2 := os.Stat(path); statErr2 == nil {
 			res.ObjectsPresent++
-		} else if os.IsNotExist(err) {
+		} else if os.IsNotExist(statErr2) {
 			res.ObjectsMissing++
 			res.MissingKeys = append(res.MissingKeys, obj.Bucket+"/"+obj.Key)
 		} else {
-			res.Errors = append(res.Errors, fmt.Sprintf("obj %s/%s stat: %v", obj.Bucket, obj.Key, err))
+			res.Errors = append(res.Errors, fmt.Sprintf("obj %s/%s stat: %v", obj.Bucket, obj.Key, statErr2))
 		}
 	}
 	return res, nil

@@ -69,14 +69,15 @@ func main() {
 				}
 			}
 		}
-		if snap, err := metadata.LoadAny(localEvac, remoteDirs); err == nil {
+		snap, loadErr := metadata.LoadAny(localEvac, remoteDirs)
+		if loadErr == nil && snap != nil {
 			slog.Info("controller: evacuation snapshot found, attempting restore", "version", snap.Version, "buckets", len(snap.Buckets))
-			restorer, err := metadata.NewRestorer(cfg.Server.DataDir)
-			if err == nil {
-				if res, err := restorer.Restore(snap); err == nil {
+			restorer, restorerErr := metadata.NewRestorer(cfg.Server.DataDir)
+			if restorerErr == nil {
+				if res, restoreErr := restorer.Restore(snap); restoreErr == nil {
 					slog.Info("controller: restore completed", "created", res.BucketsCreated, "restored", res.BucketsRestored, "missing", res.ObjectsMissing)
 				} else {
-					slog.Warn("controller: restore failed", "err", err)
+					slog.Warn("controller: restore failed", "err", restoreErr)
 				}
 			}
 			adoptedSnapshot = snap

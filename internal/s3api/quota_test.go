@@ -32,8 +32,8 @@ func TestQuotaViaRegistryIntegration(t *testing.T) {
 	}
 	// Storage-level quota: we can test IsOverQuota via real filesystem — but also test registry avail directly.
 	// Handler-level 507 test: use a small capacity temp dir and mock IsOverQuota? Instead verify quota helper logic.
-	if dp.EffectiveAvail() < 20 {
-		// would be 507 for 20 byte put
+	if avail := dp.EffectiveAvail(); avail >= 20 {
+		t.Logf("avail %d >= 20 — 507 not triggered for this threshold", avail)
 	}
 }
 
@@ -41,10 +41,8 @@ func TestPutOverQuotaReturns507(t *testing.T) {
 	dir := t.TempDir()
 	st, _ := NewStorage(dir)
 	_ = st.CreateBucket("bkt")
-	// Handler with quota check: we can't force filesystem to be full in test, so test the handler path
-	// by checking that normal put succeeds and that storage IsOverQuota for 0 additional is false.
 	if st.IsOverQuota(1<<40) && st.FilesystemCapacity() != 0 {
-		// On small filesystems this may be true; just verify method exists and doesn't panic.
+		t.Log("filesystem is near capacity — IsOverQuota true, quota path exercised")
 	}
 	router := NewRouter(st, "us-east-1")
 	astore := auth.NewStoreWith(map[string]string{"K": "secret12345678"})
