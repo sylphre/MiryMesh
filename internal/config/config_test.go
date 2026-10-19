@@ -22,7 +22,8 @@ func TestServerValidate(t *testing.T) {
 		cfg     ServerConfig
 		wantErr bool
 	}{
-		{"valid :9000", ServerConfig{Listen: ":9000", Region: "us-east-1", DataDir: "/var/lib/mirymesh"}, false},
+		{"valid 0.0.0.0:9000", ServerConfig{Listen: "0.0.0.0:9000", AdminListen: "0.0.0.0:9001", Region: "us-east-1", DataDir: "/var/lib/mirymesh"}, false},
+		{"valid :9000 (short)", ServerConfig{Listen: ":9000", Region: "us-east-1", DataDir: "/var/lib/mirymesh"}, false},
 		{"valid 127.0.0.1:9000", ServerConfig{Listen: "127.0.0.1:9000"}, false},
 		{"empty listen", ServerConfig{Listen: ""}, true},
 		{"bad listen", ServerConfig{Listen: "9000"}, true},

@@ -220,15 +220,16 @@ fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload 2>/dev/null || true
   if [ "$ROLE" = "master" ]; then
-    log "To start Master: sudo systemctl enable --now mirymesh-controller && xdg-open http://127.0.0.1:9001/  (setup wizard at /static/setup.html)"
-    log "Setup:    Master 初回はブラウザで http://master:9001/ → /static/setup.html で AccessKey/Secret/Policy を入力 (Admin Token は localStorage に保存)"
+    log "To start Master: sudo systemctl enable --now mirymesh-controller && xdg-open http://127.0.0.1:9000/  # setup redirects to http://127.0.0.1:9001/static/setup.html (S3 0.0.0.0:9000 / Admin 0.0.0.0:9001, Tailscale 100.114.64.41:900x, firewall/Tailscale ACL required)"
+    log "Setup:    Master 初回はブラウザで http://100.114.64.41:9001/static/setup.html または http://127.0.0.1:9001/static/setup.html で AccessKey/Secret/Policy を入力 (Token は localStorage に保存, 0.0.0.0:9001 は public に晒さない)"
     log "Status:   systemctl status mirymesh-controller; journalctl -u mirymesh-controller -f"
-    log "Health:   curl -f http://127.0.0.1:9000/healthz                          # S3 (9000)"
-    log "Admin:    curl -H \"X-Admin-Token: \$TOKEN\" http://127.0.0.1:9001/api/admin/health  # Admin (9001, Tailscale/127.0.0.1 only)"
+    log "Health:   curl -f http://127.0.0.1:9000/healthz                          # S3 0.0.0.0:9000 (Tailscale 100.114.64.41:9000)"
+    log "Admin:    curl -H \"X-Admin-Token: \$TOKEN\" http://127.0.0.1:9001/api/admin/health  # Admin 0.0.0.0:9001 (Tailscale 100.114.64.41:9001, firewall required)"
   else
     log "To start Client: sudo systemctl enable --now mirymesh-datanode"
     log "Status:   systemctl status mirymesh-datanode; journalctl -u mirymesh-datanode -f"
-    log "Check Master: curl -H \"X-Admin-Token: \$TOKEN\" http://127.0.0.1:9001/api/admin/nodes  # from Master host (admin 9001)"
+    log "Check Master: curl -H \"X-Admin-Token: \$TOKEN\" http://100.114.64.41:9001/api/admin/nodes  # from Tailscale or 127.0.0.1:9001 (admin 0.0.0.0:9001)"
+    log "DataNode: listen 0.0.0.0:9002 (Tailscale 100.114.64.41:9002), firewall/Tailscale ACL required"
   fi
 else
   if [ "$ROLE" = "master" ]; then

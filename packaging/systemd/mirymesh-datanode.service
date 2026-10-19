@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
 [Unit]
-Description=MiryMesh Data Node
+Description=MiryMesh Data Node (0.0.0.0:9002 — Tailscale 100.114.64.41:9002 or 127.0.0.1; do not expose to public)
 After=network.target
 
 [Service]

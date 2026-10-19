@@ -100,10 +100,14 @@ var (
 func Default() Config {
 	return Config{
 		Server: ServerConfig{
-			Listen:      ":9000",
-			AdminListen: ":9001",
+			Listen:      "0.0.0.0:9000",
+			AdminListen: "0.0.0.0:9001",
 			Region:      "us-east-1",
 			DataDir:     "/var/lib/mirymesh",
+		},
+		Datanode: DatanodeConfig{
+			ControllerURL: "http://127.0.0.1:9000",
+			Paths:         nil,
 		},
 		DB: DBConfig{},
 		Log: LogConfig{
@@ -127,9 +131,13 @@ func Load(path string) (Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	// Fill admin_listen default if not set (existing configs with only listen).
+	// Fill admin_listen default if not set (existing configs with only listen). Explicit 127.0.0.1 is respected (not overwritten).
 	if strings.TrimSpace(cfg.Server.AdminListen) == "" {
-		cfg.Server.AdminListen = ":9001"
+		cfg.Server.AdminListen = "0.0.0.0:9001"
+	}
+	// Fill Listen if empty
+	if strings.TrimSpace(cfg.Server.Listen) == "" {
+		cfg.Server.Listen = "0.0.0.0:9000"
 	}
 	// Normalize gateway alias
 	if cfg.Storage.Gateway {
@@ -182,14 +190,13 @@ func (c *Config) Validate() error {
 
 func (s ServerConfig) validate() error {
 	if strings.TrimSpace(s.Listen) == "" {
-		return errors.New("listen must not be empty (e.g. \":9000\")")
+		return errors.New("listen must not be empty (e.g. \"0.0.0.0:9000\")")
 	}
 	if _, _, err := net.SplitHostPort(s.Listen); err != nil {
 		return fmt.Errorf("listen %q is not a valid host:port: %w", s.Listen, err)
 	}
 	if strings.TrimSpace(s.AdminListen) == "" {
-		// Default admin listen is :9001 — validated as above, but empty is allowed as fallback (means :9001).
-		// Keep validation permissive: if explicitly set, must be host:port.
+		// Empty is allowed as fallback (means 0.0.0.0:9001)
 	} else {
 		if _, _, err := net.SplitHostPort(s.AdminListen); err != nil {
 			return fmt.Errorf("admin_listen %q is not a valid host:port: %w", s.AdminListen, err)

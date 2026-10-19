@@ -191,9 +191,10 @@ func main() {
 
 	adminListen := cfg.Server.AdminListen
 	if adminListen == "" {
-		adminListen = ":9001"
+		adminListen = "0.0.0.0:9001"
 	}
-	slog.Info("mirymesh-controller: admin listen", "addr", adminListen, "hint", "keep on Tailscale / 127.0.0.1, do not expose to public")
+	slog.Info("mirymesh-controller: admin listen", "addr", adminListen, "hint", "0.0.0.0:9001 on Tailscale 100.114.64.41:9001; do not expose to public, keep behind firewall/Tailscale ACL")
+	slog.Info("mirymesh-controller: s3 listen", "addr", cfg.Server.Listen, "hint", "0.0.0.0:9000 on Tailscale 100.114.64.41:9000 or reverse-proxy; do not expose to public")
 	slog.Info("mirymesh-controller starting", "listen", cfg.Server.Listen, "dataDir", cfg.Server.DataDir, "region", cfg.Server.Region, "adminListen", adminListen)
 	adminSrv := &http.Server{Addr: adminListen, Handler: adminMuxWithStatic, ReadTimeout: 30 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 120 * time.Second}
 	go func() {
