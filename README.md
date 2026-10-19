@@ -3,11 +3,11 @@
 # MiryMesh S3
 
 <p lang="ja">
-MiryMesh は Linux（Debian / Alma / Rocky）向けの分散 S3 互換オブジェクトストレージです。S3 互換 API を提供しつつ、複数の物理ディスク / サーバに容量を分散できます。設計は <code>AGENTS.md §1-3</code> を参照。LXC 上での素の Linux 運用を主とし、Docker は任意です。
+MiryMesh は Linux（Debian / Alma / Rocky）向けの分散 S3 互換オブジェクトストレージです。S3 互換 API を提供しつつ、複数の物理ディスク / サーバに容量を分散できます。LXC 上での素の Linux 運用を主とし、Docker は任意です。
 </p>
 
 <p lang="en">
-MiryMesh is a distributed, S3-compatible object storage for Linux (Debian / Alma / Rocky). It exposes an S3-compatible API while spreading capacity across multiple disks and servers. Design is in <code>AGENTS.md §1-3</code>. LXC-first, Docker is optional.
+MiryMesh is a distributed, S3-compatible object storage for Linux (Debian / Alma / Rocky). It exposes an S3-compatible API while spreading capacity across multiple disks and servers. LXC-first, Docker is optional.
 </p>
 
 ---

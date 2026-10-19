@@ -16,7 +16,7 @@ gofmt -l .  # must be empty
 - Branches: one milestone per PR, keep `go test -cover`.
 
 ## Architecture
-- See `AGENTS.md §2-3` for component boundaries (S3 API / metadata / placement / replication / GUI).
+- See `README.md` for the overall architecture (S3 API / metadata / placement / replication / GUI).
 - ADRs live in `docs/ADR-*.md` (ignored in git; ask maintainer if you need one).
 - Note: `docs/` is currently `.gitignore`'d as non-public; when the public release window opens, a subset of docs will be published to `docs/` (ask maintainer about timing).
 - Controller (`cmd/controller`) and datanode (`cmd/datanode`) share `internal/config` validation centrally.
