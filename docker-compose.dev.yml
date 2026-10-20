@@ -5,12 +5,15 @@ services:
     build:
       context: .
       dockerfile: packaging/docker/Dockerfile.dev
+    depends_on: [db]
     ports: ["9000:9000", "9001:9001"]
     volumes:
       - .:/src
       - /src/tmp
     environment:
       - MIRYMESH_MASTER_KEY=dev-master-key-32chars-1234567890
+      - MIRYMESH_DB_DSN=postgres://mirymesh:mirymesh@db:5432/mirymesh?sslmode=disable
+      - MIRYMESH_DB_DRIVER=postgres
     command: air -c .air.toml
   db:
     image: postgres:16-alpine

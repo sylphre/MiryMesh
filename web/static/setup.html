@@ -17,7 +17,7 @@
     <h1 class="topbar__title">MiryMesh — Setup</h1>
     <span class="caption" style="margin-left: auto;">初期設定ウィザード</span>
   </header>
-  <main class="container container--narrow" x-data="{ dbConfigured: false, mode: 'standalone' }" x-init="const t=localStorage.getItem('mirymesh_admin_token')||''; fetch('/api/admin/config', {headers: t?{'X-Admin-Token':t}:{}}).then(r=>r.json()).then(j=>{dbConfigured=!!j.db_configured; mode=j.mode||'standalone';}).catch(()=>{})">
+  <main class="container container--narrow" x-data="{ dbConfigured: false, mode: 'standalone', adminUser: '', adminPass: '' }" x-init="const t=localStorage.getItem('mirymesh_admin_token')||''; fetch('/api/admin/config', {headers: t?{'X-Admin-Token':t}:{}}).then(r=>r.json()).then(j=>{dbConfigured=!!j.db_configured; mode=j.mode||'standalone';}).catch(()=>{})">
     <div class="card" id="setup-card">
       <h2>初期設定</h2>
       <p class="caption" style="margin-top: var(--space-xs);">Admin 作成 → ログイン → S3 / DB / Storage の2段階で完了します。</p>
@@ -29,9 +29,9 @@
       <p class="state--loading" id="status">読み込み中…</p>
       <form id="step1-form" class="form form--stack" style="display:none;">
         <h3>Step 1 — Admin アカウント作成</h3>
-        <label>Admin Username <input name="username" class="input" required minlength="3" placeholder="admin" x-model="adminUser" /></label>
-        <label>Admin Password <input name="password" class="input" type="password" required minlength="8" placeholder="8文字以上" x-model="adminPass" /></label>
-        <button type="submit" class="btn btn--primary" x-bind:disabled="!$el.form.checkValidity()">作成して次へ</button>
+        <label>Admin Username <input name="username" class="input" required minlength="3" placeholder="admin" /></label>
+        <label>Admin Password <input name="password" class="input" type="password" required minlength="8" placeholder="8文字以上" /></label>
+        <button type="submit" class="btn btn--primary">作成して次へ</button>
       </form>
       <div id="step1-done" style="display:none;">
         <p class="state--success" id="step1-msg"></p>
@@ -44,7 +44,7 @@
         <label>Password <input name="password" class="input" type="password" required /></label>
         <button type="submit" class="btn btn--primary">ログイン</button>
       </form>
-      <form id="step2-form" class="form form--stack" style="display:none;" x-data="{ dbConfigured: $parent ? $parent.dbConfigured : false, mode: $parent ? $parent.mode : 'standalone' }">
+      <form id="step2-form" class="form form--stack" style="display:none;">
         <h3>Step 2 — S3 / DB / Storage</h3>
         <div style="display: grid; grid-template-columns: 1fr auto; gap: var(--space-sm); align-items: end;">
           <label>AccessKey <input name="access_key" class="input" required minlength="3" placeholder="TESTKEY" /></label>
