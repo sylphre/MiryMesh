@@ -54,8 +54,8 @@
           <label>SecretKey <input name="secret_key" class="input" type="password" required minlength="8" placeholder="8文字以上" /></label>
           <button type="button" class="btn btn--sm" id="gen-sk" style="height: 40px;">生成</button>
         </div>
-        <div class="grid grid--2" style="margin-top: 0;" x-show="!dbConfigured">
-          <label>Region <input name="region" class="input" placeholder="us-east-1" x-bind:required="!dbConfigured" /></label>
+        <div class="grid grid--2" style="margin-top: 0;">
+          <label>Region <input name="region" class="input" placeholder="us-east-1" /></label>
           <label>Gateway
             <select name="gateway" class="input" x-bind:disabled="mode==='gateway'">
               <option value="false">standalone</option><option value="true">gateway</option>
@@ -72,8 +72,8 @@
           </select>
         </label>
         <div class="grid grid--2" style="margin-top: 0;" x-show="!dbConfigured">
-          <label>DB Driver <select name="db_driver" class="input" x-bind:required="!dbConfigured"><option value="">auto</option><option value="postgres">postgres</option><option value="mysql">mysql</option></select></label>
-          <label>Datanode Paths <input name="datanode_paths" class="input" placeholder="/mnt/disk1,/mnt/disk2" x-bind:required="!dbConfigured" /></label>
+          <label>DB Driver <select name="db_driver" class="input"><option value="">auto</option><option value="postgres">postgres</option><option value="mysql">mysql</option></select></label>
+          <label>Datanode Paths <input name="datanode_paths" class="input" placeholder="/mnt/disk1,/mnt/disk2" x-bind:required="!dbConfigured && mode!=='gateway'" /></label>
         </div>
         <div x-show="!dbConfigured">
           <label>DB DSN <input name="db_dsn" class="input" placeholder="postgres://..." x-bind:required="!dbConfigured" /></label>

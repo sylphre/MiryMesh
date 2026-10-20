@@ -178,8 +178,10 @@ func (c *Config) Validate() error {
 	if err := c.DB.validate(); err != nil {
 		return fmt.Errorf("db: %w", err)
 	}
-	if err := c.Datanode.validate(); err != nil {
-		return fmt.Errorf("datanode: %w", err)
+	if c.Server.Mode != "gateway" {
+		if err := c.Datanode.validate(); err != nil {
+			return fmt.Errorf("datanode: %w", err)
+		}
 	}
 	if err := c.Auth.validate(); err != nil {
 		return fmt.Errorf("auth: %w", err)
