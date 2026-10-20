@@ -290,10 +290,7 @@ func (a AuthConfig) validate() error {
 		}
 		seen[c.AccessKey] = true
 	}
-	if strings.TrimSpace(a.MasterKey) == "" && os.Getenv("MIRYMESH_MASTER_KEY") == "" && (a.Credentials == nil || len(a.Credentials) == 0) {
-		// Master key is required for DB-backed setup (secret_key_enc/dsn_enc). Allow file-mode with credentials.
-		// No-op here — enforced at controller startup when DB is configured.
-	}
+	// Validation for master key is deferred to controller startup (when DB is actually configured).
 	return nil
 }
 

@@ -27,14 +27,13 @@ func NewSetupStoreDB(db *sql.DB, driver, masterKey string) *SetupStoreDB {
 func (s *SetupStoreDB) IsInitialized() bool {
 	var ok bool
 	// Try ? then $1 for compat
-	err := s.db.QueryRow(`SELECT initialized FROM miry_setup WHERE id=1`).Scan(&ok)
-	if err != nil {
-		_ = s.db.QueryRow(`SELECT initialized FROM miry_setup WHERE id=$1`, 1).Scan(&ok)
-		if err != nil {
-			return false
-		}
+	if err := s.db.QueryRow(`SELECT initialized FROM miry_setup WHERE id=1`).Scan(&ok); err == nil {
+		return ok
 	}
-	return ok
+	if err := s.db.QueryRow(`SELECT initialized FROM miry_setup WHERE id=$1`, 1).Scan(&ok); err == nil {
+		return ok
+	}
+	return false
 }
 
 // Get returns decrypted SetupState.
@@ -43,14 +42,12 @@ func (s *SetupStoreDB) Get() *SetupState {
 	var skEnc, dsnEnc string
 	var initBool sql.NullBool
 	// Try placeholder ?
-	err := s.db.QueryRow(`SELECT admin_username, admin_password_hash, access_key, secret_key_enc, admin_token, default_policy, region, gateway, db_driver, db_dsn_enc, datanode_paths, initialized FROM miry_setup WHERE id=1`).Scan(
+	if err := s.db.QueryRow(`SELECT admin_username, admin_password_hash, access_key, secret_key_enc, admin_token, default_policy, region, gateway, db_driver, db_dsn_enc, datanode_paths, initialized FROM miry_setup WHERE id=1`).Scan(
 		&st.AdminUsername, &st.AdminPasswordHash, &st.AccessKey, &skEnc, &st.AdminToken, &st.DefaultPolicy, &st.Region, &st.Gateway, &st.DBDriver, &dsnEnc, &st.DatanodePaths, &initBool,
-	)
-	if err != nil {
-		_ = s.db.QueryRow(`SELECT admin_username, admin_password_hash, access_key, secret_key_enc, admin_token, default_policy, region, gateway, db_driver, db_dsn_enc, datanode_paths, initialized FROM miry_setup WHERE id=$1`, 1).Scan(
+	); err != nil {
+		if err := s.db.QueryRow(`SELECT admin_username, admin_password_hash, access_key, secret_key_enc, admin_token, default_policy, region, gateway, db_driver, db_dsn_enc, datanode_paths, initialized FROM miry_setup WHERE id=$1`, 1).Scan(
 			&st.AdminUsername, &st.AdminPasswordHash, &st.AccessKey, &skEnc, &st.AdminToken, &st.DefaultPolicy, &st.Region, &st.Gateway, &st.DBDriver, &dsnEnc, &st.DatanodePaths, &initBool,
-		)
-		if err != nil {
+		); err != nil {
 			return nil
 		}
 	}
