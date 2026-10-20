@@ -141,6 +141,58 @@ func (s *SetupStore) UpdatePolicy(policy string) error {
 	return nil
 }
 
+// Update merges S3/DB fields for the file store (Step2 after init).
+func (s *SetupStore) Update(st *SetupState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state == nil {
+		s.state = st
+		s.state.Initialized = true
+	} else {
+		// Merge non-empty fields
+		if st.AccessKey != "" {
+			s.state.AccessKey = st.AccessKey
+		}
+		if st.SecretKey != "" {
+			s.state.SecretKey = st.SecretKey
+		}
+		if st.DefaultPolicy != "" {
+			s.state.DefaultPolicy = st.DefaultPolicy
+		}
+		if st.Region != "" {
+			s.state.Region = st.Region
+		}
+		if st.DatanodePaths != "" {
+			s.state.DatanodePaths = st.DatanodePaths
+		}
+		if st.DBDriver != "" {
+			s.state.DBDriver = st.DBDriver
+		}
+		if st.DBDSN != "" {
+			s.state.DBDSN = st.DBDSN
+		}
+		if st.Gateway {
+			s.state.Gateway = st.Gateway
+		}
+	}
+	data, err := json.MarshalIndent(s.state, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
+		return err
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 func generateToken() string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
