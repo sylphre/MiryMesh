@@ -257,6 +257,9 @@ func (rt *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		writeXMLError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
+	if mRecorder != nil {
+		mRecorder(false, m.Size)
+	}
 	// If placement targets include remote nodes, the controller would replicate now.
 	// In M4, the actual remote replication is driven by the replication engine
 	// (internal/replication) via HTTP to datanodes. Here we only enforce that
@@ -333,6 +336,20 @@ func (rt *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	}
 	w.WriteHeader(status)
 	_, _ = io.Copy(w, bodyReader)
+	if mRecorder != nil {
+		if status == http.StatusPartialContent {
+			// Range: count actual bytes served
+			if rg := r.Header.Get("Range"); rg != "" {
+				if start, end, ok := parseRange(rg, size); ok {
+					mRecorder(true, end-start+1)
+				} else {
+					mRecorder(true, size)
+				}
+			}
+		} else {
+			mRecorder(true, size)
+		}
+	}
 }
 
 func (rt *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucket, key string) {

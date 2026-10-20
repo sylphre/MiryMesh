@@ -147,6 +147,10 @@ P0 と `2006-03-01` は S3 互換の核だが、MiryMesh 固有の配置・容�
 
 > **既存環境のDB一括移行（M14）**: `/var/lib/mirymesh/setup.json` が残っていれば、DB（`db.driver`+`MIRYMESH_MASTER_KEY`）を設定して再起動すると初回だけ `miry_setup` へ自動移行される（`setup.json` はそのまま残置、削除は手動）。移行後は全てDBで動作。
 
+## 開発
+
+GitHub Actions ではなくローカルで視覚デバッグ: `docker compose -f docker-compose.dev.yml up --build` → `http://localhost:9001`。`web/static` の変更はブラウザリロードで即反映、Go の変更は `air` で自動再起動（`packaging/scripts/dev.sh`）。`docker compose down -v` で汚れずに消える。
+
 ## Documentation
 
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) (dev setup, workflow, ADRs)

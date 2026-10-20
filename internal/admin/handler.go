@@ -34,6 +34,7 @@ type Handler struct {
 	adminToken string
 	setupStore SetupStoreIface
 	authStore  *auth.Store
+	metrics    *Metrics
 }
 
 // New creates a Handler.
@@ -46,8 +47,12 @@ func NewWithSetup(reg *datanode.Registry, storage s3api.ObjectStore, resolver *p
 	if jobs == nil {
 		jobs = replication.NewStore()
 	}
-	return &Handler{registry: reg, storage: storage, resolver: resolver, jobs: jobs, adminToken: adminToken, setupStore: setup, authStore: authStore}
+	metrics := NewMetrics()
+	return &Handler{registry: reg, storage: storage, resolver: resolver, jobs: jobs, adminToken: adminToken, setupStore: setup, authStore: authStore, metrics: metrics}
 }
+
+// Metrics exposes the handler's metrics for s3api recorder wiring.
+func (h *Handler) Metrics() *Metrics { return h.metrics }
 
 // RegisterRoutes mounts handlers on mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -58,6 +63,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/buckets/", h.handleBucketSub)
 	mux.HandleFunc("/api/admin/jobs", h.handleJobs)
 	mux.HandleFunc("/api/admin/cluster", h.handleCluster)
+	mux.HandleFunc("/api/admin/metrics", h.handleMetrics)
 	h.setupRoutes(mux)
 	if h.setupStore != nil {
 		// Also expose config endpoints

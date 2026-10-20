@@ -11,6 +11,12 @@ import (
 	"github.com/sylphre/MiryMesh/internal/placement"
 )
 
+// Metrics hooks for GET/PUT byte tracking (set by controller).
+var mRecorder func(isGet bool, bytes int64)
+
+// SetMetricsRecorder sets the global recorder for S3 GET/PUT.
+func SetMetricsRecorder(fn func(bool, int64)) { mRecorder = fn }
+
 // Router routes S3-compatible requests. In M1 it handles path-style only
 // (virtual-hosted style is shimmable but not required for Nextcloud/Misskey).
 type Router struct {

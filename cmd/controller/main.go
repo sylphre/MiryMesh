@@ -184,6 +184,13 @@ func main() {
 	adminHandler := admin.NewWithSetup(reg, store, resolver, jobsStore, internalToken, setupStore, authStore)
 	adminMux := http.NewServeMux()
 	adminHandler.RegisterRoutes(adminMux)
+	s3api.SetMetricsRecorder(func(isGet bool, bytes int64) {
+		if isGet {
+			adminHandler.Metrics().RecordGet(bytes)
+		} else {
+			adminHandler.Metrics().RecordPut(bytes)
+		}
+	})
 
 	staticDir := resolveStaticDir()
 	staticFS := http.FileServer(http.Dir(staticDir))

@@ -72,4 +72,9 @@
 
   /* ── Container ── */
   --container-max: 1080px;
+
+  /* ── Card / Metric (MinIO Console high-density, near-future) ── */
+  --card-radius: 12px;
+  --card-gap: 16px;
+  --gauge-size: 96px;
 }

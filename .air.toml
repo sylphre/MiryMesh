@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+root = "."
+tmp_dir = "tmp"
+[build]
+  cmd = "go build -buildvcs=false -o ./tmp/mirymesh-controller ./cmd/controller"
+  bin = "./tmp/mirymesh-controller /tmp/mirymesh-dev.yaml"
+  include_ext = ["go", "html", "css", "js"]
+  exclude_dir = ["tmp", "design-data", "design-base", "review", "docs"]
