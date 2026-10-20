@@ -68,12 +68,12 @@ sudo systemctl enable --now mirymesh-controller
 
 スクリプトは `preinstall.sh`/`postinstall.sh` と同様に `mirymesh:mirymesh` ユーザを作成し、`/var/lib/mirymesh` を用意します。
 Client は `install.sh --client --master-url http://master:9000` で `datanode.controller_url` が既に注入されるため、セットアップ画面は出ません。不足があれば Web の Settings で `datanode.paths` を確認してください。
-Master では `mirymesh-controller` が 2 ポートで起動します（S3 `0.0.0.0:9000` / Admin `0.0.0.0:9001` — いずれも Tailscale `100.114.64.41:900x` と `127.0.0.1:900x` で届く。`0.0.0.0:900x` を public に晒さない; `X-Admin-Token` + Tailscale ACL / ファイアウォールで閉じる。`admin_listen: 127.0.0.1:9001` で localhost のみに絞ることも可）。DataNode は `0.0.0.0:9002`。Client の `datanode.paths`（例: `["/mnt/disk1"]`）と `datanode.controller_url` はスクリプトが `--master-url` から自動設定します。
+Master では `mirymesh-controller` が 2 ポートで起動します（S3 `0.0.0.0:9000` / Admin `0.0.0.0:9001` — いずれも Tailscale `<tailscale-ip>:900x` と `127.0.0.1:900x` で届く。`0.0.0.0:900x` を public に晒さない; `X-Admin-Token` + Tailscale ACL / ファイアウォールで閉じる。`admin_listen: 127.0.0.1:9001` で localhost のみに絞ることも可）。DataNode は `0.0.0.0:9002`。Client の `datanode.paths`（例: `["/mnt/disk1"]`）と `datanode.controller_url` はスクリプトが `--master-url` から自動設定します。
 
 | Port | 用途 | 例 |
 |---|---|---|
-| `0.0.0.0:9000` | S3 API（`PUT/GET` 等、SigV4） — Tailscale `100.114.64.41:9000` / `127.0.0.1:9000` / reverse-proxy `80` -> `127.0.0.1:9000` | `curl -f http://127.0.0.1:9000/healthz` / `curl -f http://100.114.64.41:9000/healthz` |
-| `0.0.0.0:9001` | Admin GUI/API（`setup`/`settings`/`/api/admin/*`、Token `X-Admin-Token`） — Tailscale `100.114.64.41:9001` / `127.0.0.1:9001`, firewall で閉じる | `curl -H "X-Admin-Token: $TOKEN" http://127.0.0.1:9001/api/admin/health` / `curl -H "X-Admin-Token: $TOKEN" http://100.114.64.41:9001/api/admin/health` |
+| `0.0.0.0:9000` | S3 API（`PUT/GET` 等、SigV4） — Tailscale `<tailscale-ip>:9000` / `127.0.0.1:9000` / reverse-proxy `80` -> `127.0.0.1:9000` | `curl -f http://127.0.0.1:9000/healthz` / `curl -f http://<tailscale-ip>:9000/healthz` |
+| `0.0.0.0:9001` | Admin GUI/API（`setup`/`settings`/`/api/admin/*`、Token `X-Admin-Token`） — Tailscale `<tailscale-ip>:9001` / `127.0.0.1:9001`, firewall で閉じる | `curl -H "X-Admin-Token: $TOKEN" http://127.0.0.1:9001/api/admin/health` / `curl -H "X-Admin-Token: $TOKEN" http://<tailscale-ip>:9001/api/admin/health` |
 | `0.0.0.0:9002` | DataNode (`/internal/*`, `X-Internal-Token`) — Tailscale / `127.0.0.1`, firewall で閉じる | `curl -f http://127.0.0.1:9002/healthz` |
 
 `0.0.0.0:9000` の `/api/admin/*` は `404 Admin API lives on admin port (0.0.0.0:9001)` を返す。

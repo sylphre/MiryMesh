@@ -1,26 +1,75 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 /* Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. */
 /* Tokens only: :root. No resets, no element selectors. */
+/* Visual Theme: black base + near-future infra */
+
 :root {
+  /* ── Background ── */
   --color-bg: #0a0a0a;
-  --color-fg: #f5f5f5;
-  --color-muted: #9a9a9a;
-  --color-border: #2a2a2a;
+  --color-bg-soft: #141414;
   --color-surface: #1a1a1a;
-  --color-soft: #2a2a2a;
+  --color-surface-hover: #222222;
+  --color-surface-raised: #242424;
+
+  /* ── Text ── */
+  --color-fg: #f5f5f7;
+  --color-fg-secondary: rgba(245, 245, 247, 0.72);
+  --color-muted: #8a8a8e;
+  --color-muted-soft: rgba(255, 255, 255, 0.38);
+  --color-disabled: rgba(255, 255, 255, 0.22);
+
+  /* ── Border ── */
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-border-strong: rgba(255, 255, 255, 0.14);
+  --color-border-focus: #38bdf8;
+
+  /* ── Soft / muted fills ── */
+  --color-soft: rgba(255, 255, 255, 0.06);
+
+  /* ── Primary ── */
   --color-primary: #38bdf8;
-  --color-primary-contrast: #0a0a0a;
+  --color-primary-hover: #0ea5e9;
+  --color-primary-contrast: #020617;
+  --color-primary-glow: rgba(56, 189, 248, 0.42);
+
+  /* ── Semantic ── */
   --color-success: #4ade80;
-  --color-success-bg: #14532d;
+  --color-success-bg: rgba(74, 222, 128, 0.11);
+  --color-success-border: rgba(74, 222, 128, 0.22);
   --color-warning: #fb923c;
+  --color-warning-bg: rgba(251, 146, 60, 0.10);
   --color-error: #f87171;
-  --color-error-bg: #450a0a;
-  --radius: 8px;
+  --color-error-bg: rgba(248, 113, 113, 0.11);
+  --color-error-border: rgba(248, 113, 113, 0.20);
+
+  /* ── Radius ── */
+  --radius-xs: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
   --radius-pill: 999px;
+
+  /* ── Spacing ── */
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
   --space-lg: 24px;
-  --font-sans: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
-  --font-mono: ui-monospace, "Cascadia Code", monospace;
+  --space-xl: 36px;
+  --space-2xl: 56px;
+
+  /* ── Shadow / Depth ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --shadow-glow: 0 0 24px var(--color-primary-glow);
+
+  /* ── Blur ── */
+  --blur-nav: saturate(180%) blur(20px);
+
+  /* ── Font ── */
+  --font-sans: "SF Pro JP", "SF Pro Text", "SF Pro Display", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", Meiryo, "ＭＳ Ｐゴシック", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "SF Pro JP", "SF Pro Display", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", Meiryo, sans-serif;
+  --font-mono: "SFMono-Regular", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* ── Container ── */
+  --container-max: 1080px;
 }

@@ -13,7 +13,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1 class="topbar__title">MiryMesh S3 — Settings</h1>
+    <h1 class="topbar__title">MiryMesh</h1>
     <nav class="topbar__nav">
       <a href="/static/index.html" class="topbar__link">Dashboard</a>
       <a href="/static/nodes.html" class="topbar__link">Nodes</a>
@@ -21,18 +21,23 @@
       <a href="/static/buckets.html" class="topbar__link">Buckets</a>
       <a href="/static/jobs.html" class="topbar__link">Jobs</a>
       <a href="/static/settings.html" class="topbar__link topbar__link--active">Settings</a>
+      <a href="/api-doc" class="topbar__link">API Doc</a>
     </nav>
   </header>
   <main class="container">
-    <div class="card">
-      <h3>Mode</h3>
-      <p id="mode-status" class="state--loading">Loading…</p>
+    <div style="margin-bottom: var(--space-lg);">
+      <h2>Settings</h2>
+      <p class="caption" style="margin-top: var(--space-xs);">クラスタの動作モードと配置ポリシー、ディスクパスを一括管理。</p>
     </div>
     <div class="card">
-      <h3>Default Placement Policy</h3>
+      <p class="card__title">Mode</p>
+      <p id="mode-status" class="state--loading">Loading…</p>
+    </div>
+    <div class="card" style="margin-top: var(--space-md);">
+      <p class="card__title">Default Placement Policy</p>
       <p id="policy-status" class="state--loading">Loading…</p>
-      <form id="policy-form" class="form">
-        <select name="policy" class="input">
+      <form id="policy-form" class="form" style="margin-top: var(--space-md);">
+        <select name="policy" class="input" style="max-width: 200px;">
           <option value="single">single</option>
           <option value="dual">dual</option>
           <option value="triple">triple</option>
@@ -41,13 +46,14 @@
         <button type="submit" class="btn btn--primary">保存</button>
       </form>
     </div>
-    <div class="card">
-      <h3>DataNode Paths</h3>
+    <div class="card" style="margin-top: var(--space-md);">
+      <p class="card__title">DataNode Paths</p>
       <p id="paths-status" class="state--loading">Loading…</p>
       <div id="paths"></div>
     </div>
   </main>
   <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
   <script>
   (async function() {
     const statusEl = document.getElementById("policy-status");
@@ -55,23 +61,22 @@
     const modeEl = document.getElementById("mode-status");
     const token = localStorage.getItem("mirymesh_admin_token") || "";
     const headers = token ? { "X-Admin-Token": token } : {};
-    // Load current config
     try {
       const res = await fetch("/api/admin/config", { headers });
       if (!res.ok) throw new Error(await res.text());
       const j = await res.json();
-      modeEl.textContent = "Mode: " + (j.mode || "standalone") + (j.mode === "gateway" ? " (Master holds no S3 objects; all data on DataNodes)" : "");
+      modeEl.textContent = "Mode: " + (j.mode || "standalone") + (j.mode === "gateway" ? " — Master は S3 実体を持たず、全データは DataNodes に分散" : " — Master も S3 実体を保持");
       modeEl.className = "state--success";
-      statusEl.textContent = "Current: " + (j.default_policy || "single") + " | Paths: " + (j.paths||[]).join(", ");
+      statusEl.textContent = "Current: " + (j.default_policy || "single") + "  ·  Paths: " + (j.paths||[]).join(", ");
       statusEl.className = "state--success";
       form.elements.policy.value = j.default_policy || "single";
       const pathsEl = document.getElementById("paths");
       const disks = j.disks || [];
-      if (!disks.length) pathsEl.textContent = "No disks";
+      if (!disks.length) pathsEl.innerHTML = '<span class="state--empty">No disks</span>';
       else {
         const esc = MiryMeshAPI.escapeHTML || function(s){ const d=document.createElement("div"); d.textContent=s; return d.innerHTML; };
-        const rows = disks.map(d => esc(String(d.NodeID)) + ":" + esc(String(d.Path)) + " (" + esc(String(d.Capacity)) + " cap, " + esc(String(d.Used)) + " used)");
-        pathsEl.innerHTML = rows.map(r => "<div>" + r + "</div>").join("");
+        const rows = disks.map(d => esc(String(d.NodeID)) + ":" + esc(String(d.Path)) + " — " + esc(String(d.Capacity)) + " cap / " + esc(String(d.Used)) + " used");
+        pathsEl.innerHTML = rows.map(r => "<div style='padding:6px 0;border-bottom:1px solid var(--color-border);font-size:14px;color:var(--color-fg-secondary);'>" + r + "</div>").join("");
       }
       document.getElementById("paths-status").style.display = "none";
     } catch (e) {

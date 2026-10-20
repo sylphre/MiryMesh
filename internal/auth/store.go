@@ -42,6 +42,13 @@ func (s *Store) Add(accessKey, secretKey string) error {
 	return nil
 }
 
+// Remove deletes a credential.
+func (s *Store) Remove(accessKey string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.creds, accessKey)
+}
+
 // Secret returns the secret key for an access key, or false if unknown.
 func (s *Store) Secret(accessKey string) (string, bool) {
 	s.mu.RLock()

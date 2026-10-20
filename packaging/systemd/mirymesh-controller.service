@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
 [Unit]
-Description=MiryMesh Controller (S3 on 0.0.0.0:9000 / Admin on 0.0.0.0:9001 — Tailscale 100.114.64.41:900x or reverse-proxy; do not expose 0.0.0.0:900x to public)
+Description=MiryMesh Controller (S3 on 0.0.0.0:9000 / Admin on 0.0.0.0:9001 — Tailscale <tailscale-ip>:900x or reverse-proxy; do not expose 0.0.0.0:900x to public)
 After=network.target
 
 [Service]

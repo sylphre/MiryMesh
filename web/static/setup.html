@@ -13,34 +13,49 @@
 </head>
 <body>
   <header class="topbar">
-    <h1 class="topbar__title">MiryMesh S3 — Setup</h1>
+    <h1 class="topbar__title">MiryMesh — Setup</h1>
+    <span class="caption" style="margin-left: auto;">初期設定ウィザード</span>
   </header>
-  <main class="container">
+  <main class="container container--narrow">
     <div class="card" id="setup-card">
       <h2>初期設定</h2>
+      <p class="caption" style="margin-top: var(--space-xs);">Admin 作成 → ログイン → S3 / DB / Storage の2段階で完了します。</p>
+      <div class="stepper" style="margin-top: var(--space-md);">
+        <div class="stepper__step stepper__step--active" id="step-dot-1"></div>
+        <div class="stepper__step" id="step-dot-2"></div>
+        <div class="stepper__step" id="step-dot-3"></div>
+      </div>
       <p class="state--loading" id="status">読み込み中…</p>
-      <form id="step1-form" class="form" style="flex-direction:column;align-items:stretch;display:none;">
-        <h3>Step 1 — Admin ログイン</h3>
+      <form id="step1-form" class="form form--stack" style="display:none;">
+        <h3>Step 1 — Admin アカウント作成</h3>
         <label>Admin Username <input name="username" class="input" required minlength="3" placeholder="admin" /></label>
-        <label>Admin Password <input name="password" class="input" type="password" required minlength="8" placeholder="8+ chars" /></label>
-        <button type="submit" class="btn btn--primary">Admin 作成 → ログイン</button>
+        <label>Admin Password <input name="password" class="input" type="password" required minlength="8" placeholder="8文字以上" /></label>
+        <button type="submit" class="btn btn--primary">作成して次へ</button>
       </form>
       <div id="step1-done" style="display:none;">
         <p class="state--success" id="step1-msg"></p>
-        <button id="to-login" class="btn">ログイン</button>
+        <button id="to-login" class="btn btn--primary">ログインへ進む</button>
       </div>
-      <form id="login-form" class="form" style="flex-direction:column;align-items:stretch;display:none;">
-        <h3>Admin ログイン</h3>
+      <form id="login-form" class="form form--stack" style="display:none;">
+        <h3>ログイン</h3>
         <label>Username <input name="username" class="input" required /></label>
         <label>Password <input name="password" class="input" type="password" required /></label>
         <button type="submit" class="btn btn--primary">ログイン</button>
       </form>
-      <form id="step2-form" class="form" style="flex-direction:column;align-items:stretch;display:none;">
-        <h3>Step 2 — S3 / DB / Storage 設定</h3>
-        <label>AccessKey <input name="access_key" class="input" required minlength="3" placeholder="TESTKEY" /> <button type="button" class="btn" id="gen-ak">生成</button></label>
-        <label>SecretKey <input name="secret_key" class="input" type="password" required minlength="8" placeholder="8+ chars" /> <button type="button" class="btn" id="gen-sk">生成</button></label>
-        <label>Region <input name="region" class="input" placeholder="us-east-1" /></label>
-        <label>Gateway <select name="gateway" class="input"><option value="false">standalone</option><option value="true">gateway</option></select></label>
+      <form id="step2-form" class="form form--stack" style="display:none;">
+        <h3>Step 2 — S3 / DB / Storage</h3>
+        <div style="display: grid; grid-template-columns: 1fr auto; gap: var(--space-sm); align-items: end;">
+          <label>AccessKey <input name="access_key" class="input" required minlength="3" placeholder="TESTKEY" /></label>
+          <button type="button" class="btn btn--sm" id="gen-ak" style="height: 40px;">生成</button>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr auto; gap: var(--space-sm); align-items: end;">
+          <label>SecretKey <input name="secret_key" class="input" type="password" required minlength="8" placeholder="8文字以上" /></label>
+          <button type="button" class="btn btn--sm" id="gen-sk" style="height: 40px;">生成</button>
+        </div>
+        <div class="grid grid--2" style="margin-top: 0;">
+          <label>Region <input name="region" class="input" placeholder="us-east-1" /></label>
+          <label>Gateway <select name="gateway" class="input"><option value="false">standalone</option><option value="true">gateway</option></select></label>
+        </div>
         <label>Default Policy
           <select name="default_policy" class="input">
             <option value="single">single</option>
@@ -49,14 +64,16 @@
             <option value="ALL">ALL</option>
           </select>
         </label>
-        <label>DB Driver <select name="db_driver" class="input"><option value="">auto</option><option value="postgres">postgres</option><option value="mysql">mysql</option></select></label>
+        <div class="grid grid--2" style="margin-top: 0;">
+          <label>DB Driver <select name="db_driver" class="input"><option value="">auto</option><option value="postgres">postgres</option><option value="mysql">mysql</option></select></label>
+          <label>Datanode Paths <input name="datanode_paths" class="input" placeholder="/mnt/disk1,/mnt/disk2" /></label>
+        </div>
         <label>DB DSN <input name="db_dsn" class="input" placeholder="postgres://..." /></label>
-        <label>Datanode Paths <input name="datanode_paths" class="input" placeholder="/mnt/disk1,/mnt/disk2" /></label>
-        <button type="submit" class="btn btn--primary">S3 設定を保存</button>
+        <button type="submit" class="btn btn--primary">保存して完了</button>
       </form>
       <div id="done" style="display:none;">
-        <p class="state--success">セットアップが完了しました。Admin Token は localStorage に保存されました。</p>
-        <p><a href="/static/index.html" class="btn btn--primary">ダッシュボードへ</a></p>
+        <p class="state--success">セットアップが完了しました。ダッシュボードへ進んでください。</p>
+        <p style="margin-top: var(--space-md);"><a href="/static/index.html" class="btn btn--primary">ダッシュボードへ</a></p>
       </div>
     </div>
   </main>
@@ -68,13 +85,18 @@
     const loginForm = document.getElementById("login-form");
     const step2 = document.getElementById("step2-form");
     const done = document.getElementById("done");
+    function setStep(n) {
+      document.getElementById("step-dot-1").className = n >= 1 ? "stepper__step stepper__step--done" : "stepper__step";
+      document.getElementById("step-dot-2").className = n === 2 ? "stepper__step stepper__step--active" : n > 2 ? "stepper__step stepper__step--done" : "stepper__step";
+      document.getElementById("step-dot-3").className = n === 3 ? "stepper__step stepper__step--active" : "stepper__step";
+    }
     try {
       const res = await fetch("/api/admin/setup/status");
       const j = await res.json();
       if (j.initialized) {
         statusEl.textContent = "既に初期化済みです。ログインしてください。";
         statusEl.className = "state--loading";
-        statusEl.style.display = "";
+        setStep(2);
         loginForm.style.display = "";
         return;
       }
@@ -84,6 +106,7 @@
       return;
     }
     statusEl.style.display = "none";
+    setStep(1);
     step1.style.display = "";
     step1.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -94,6 +117,7 @@
         const j = await res.json();
         localStorage.setItem("mirymesh_admin_token", j.admin_token);
         document.getElementById("step1-msg").textContent = "Admin 作成完了。ログインしてください。";
+        setStep(2);
         step1.style.display = "none";
         step1Done.style.display = "";
       } catch (err) {
@@ -102,7 +126,7 @@
         statusEl.style.display = "";
       }
     });
-    document.getElementById("to-login").addEventListener("click", () => { step1Done.style.display="none"; loginForm.style.display=""; });
+    document.getElementById("to-login").addEventListener("click", () => { step1Done.style.display="none"; loginForm.style.display=""; setStep(2); });
     loginForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       try {
@@ -115,6 +139,7 @@
         statusEl.style.display = "";
         loginForm.style.display = "none";
         step2.style.display = "";
+        setStep(3);
       } catch (err) {
         statusEl.textContent = "ログイン失敗: " + err.message;
         statusEl.className = "state--error";
@@ -122,23 +147,28 @@
       }
     });
     document.getElementById("gen-ak").addEventListener("click", async () => {
+      const token = localStorage.getItem("mirymesh_admin_token") || "";
       try {
-        const token = localStorage.getItem("mirymesh_admin_token") || "";
         const r = await fetch("/api/admin/generate-credentials", {method:"POST", headers: {"X-Admin-Token": token}});
-        if (!r.ok) throw new Error(await r.text());
-        const j = await r.json(); step2.elements.access_key.value = j.access_key;
+        if (r.ok) {
+          const j = await r.json();
+          if (j.access_key) step2.elements.access_key.value = j.access_key;
+          if (j.secret_key) step2.elements.secret_key.value = j.secret_key;
+          return;
+        }
       } catch {}
+      if (!step2.elements.access_key.value) {
+        const a = new Uint8Array(20);
+        crypto.getRandomValues(a);
+        step2.elements.access_key.value = Array.from(a, b => "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[b % 36]).join("").slice(0, 20);
+      }
+      if (!step2.elements.secret_key.value) {
+        const s = new Uint8Array(16);
+        crypto.getRandomValues(s);
+        step2.elements.secret_key.value = Array.from(s, b => ("0" + b.toString(16)).slice(-2)).join("").slice(0, 32);
+      }
     });
-    document.getElementById("gen-sk").addEventListener("click", async () => {
-      try {
-        const token = localStorage.getItem("mirymesh_admin_token") || "";
-        const r = await fetch("/api/admin/generate-credentials", {method:"POST", headers: {"X-Admin-Token": token}});
-        if (!r.ok) throw new Error(await r.text());
-        const j = await r.json(); step2.elements.secret_key.value = j.secret_key;
-      } catch {}
-    });
-    // Also allow client-side preview
-    document.getElementById("gen-ak").addEventListener("click", () => { if (!step2.elements.access_key.value) { const a = new Uint8Array(10); crypto.getRandomValues(a); step2.elements.access_key.value = Array.from(a, b => "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[b%36]).join(""); }});
+    document.getElementById("gen-sk").addEventListener("click", () => document.getElementById("gen-ak").click());
     step2.addEventListener("submit", async (e) => {
       e.preventDefault();
       const token = localStorage.getItem("mirymesh_admin_token") || "";
@@ -146,12 +176,15 @@
       try {
         const res = await fetch("/api/admin/setup", { method: "POST", headers: {"Content-Type":"application/json", "X-Admin-Token": token}, body: JSON.stringify({username: step1.elements.username.value || loginForm.elements.username.value, password: step1.elements.password.value || loginForm.elements.password.value, access_key: data.access_key, secret_key: data.secret_key, default_policy: data.default_policy, region: data.region, gateway: data.gateway, datanode_paths: data.datanode_paths, db_driver: data.db_driver, db_dsn: data.db_dsn}) });
         if (!res.ok) {
-          // Already initialized → try update via config endpoints
           const r2 = await fetch("/api/admin/config/policy", { method: "PUT", headers: {"Content-Type":"application/json", "X-Admin-Token": token}, body: JSON.stringify({policy: data.default_policy}) });
           if (!r2.ok) throw new Error(await r2.text());
         }
         done.style.display = "";
         step2.style.display = "none";
+        setStep(3);
+        statusEl.textContent = "完了しました";
+        statusEl.className = "state--success";
+        statusEl.style.display = "";
       } catch (err) {
         statusEl.textContent = "保存失敗: " + err.message;
         statusEl.className = "state--error";

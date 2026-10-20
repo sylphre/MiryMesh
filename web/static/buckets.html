@@ -13,25 +13,29 @@
 </head>
 <body>
   <header class="topbar">
-    <h1 class="topbar__title">MiryMesh S3</h1>
+    <h1 class="topbar__title">MiryMesh</h1>
     <nav class="topbar__nav">
       <a href="/static/index.html" class="topbar__link">Dashboard</a>
       <a href="/static/nodes.html" class="topbar__link">Nodes</a>
       <a href="/static/disks.html" class="topbar__link">Disks</a>
       <a href="/static/buckets.html" class="topbar__link topbar__link--active">Buckets</a>
       <a href="/static/jobs.html" class="topbar__link">Jobs</a>
+      <a href="/static/settings.html" class="topbar__link">Settings</a>
       <a href="/api-doc" class="topbar__link">API Doc</a>
     </nav>
   </header>
   <main class="container">
-    <h2>Buckets</h2>
+    <div style="margin-bottom: var(--space-lg);">
+      <h2>Buckets</h2>
+      <p class="caption" style="margin-top: var(--space-xs);">バケット一覧と配置ポリシー（single / dual / triple / ALL）。</p>
+    </div>
     <div class="card">
       <form id="create-bucket-form" class="form">
-        <input name="name" class="input" placeholder="bucket-name" required />
+        <input name="name" class="input" placeholder="新しいバケット名" required style="flex: 1;" />
         <button type="submit" class="btn btn--primary">Create</button>
       </form>
     </div>
-    <div id="buckets" class="card">Loading…</div>
+    <div id="buckets" class="card" style="margin-top: var(--space-md);">Loading…</div>
   </main>
   <script src="/static/js/api.js"></script>
   <script src="/static/js/layout.js"></script>

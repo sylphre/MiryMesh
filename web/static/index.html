@@ -13,23 +13,52 @@
 </head>
 <body>
   <header class="topbar">
-    <h1 class="topbar__title">MiryMesh S3</h1>
+    <h1 class="topbar__title">MiryMesh</h1>
     <nav class="topbar__nav">
       <a href="/static/index.html" class="topbar__link topbar__link--active">Dashboard</a>
       <a href="/static/nodes.html" class="topbar__link">Nodes</a>
       <a href="/static/disks.html" class="topbar__link">Disks</a>
       <a href="/static/buckets.html" class="topbar__link">Buckets</a>
       <a href="/static/jobs.html" class="topbar__link">Jobs</a>
+      <a href="/static/settings.html" class="topbar__link">Settings</a>
       <a href="/api-doc" class="topbar__link">API Doc</a>
     </nav>
   </header>
   <main class="container">
-    <h2>Dashboard</h2>
-    <div id="cluster" class="card">Loading…</div>
+    <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--space-lg);">
+      <h2 style="font-size: 28px;">Dashboard</h2>
+      <span class="caption">Cluster overview — 近未来のストレージを一望</span>
+    </div>
+    <div id="cluster" class="card card--glow">Loading…</div>
     <div class="grid">
-      <div class="card"><h3>Nodes</h3><div id="nodes"></div></div>
-      <div class="card"><h3>Buckets</h3><div id="buckets"></div></div>
-      <div class="card"><h3>Jobs</h3><div id="jobs"></div></div>
+      <div class="card">
+        <p class="card__title">Nodes</p>
+        <p class="card__metric" id="metric-nodes">—</p>
+        <p class="card__metric-sub">オンライン / 総数</p>
+        <div id="nodes" style="margin-top: var(--space-md);"></div>
+      </div>
+      <div class="card">
+        <p class="card__title">Buckets</p>
+        <p class="card__metric" id="metric-buckets">—</p>
+        <p class="card__metric-sub">総バケット数</p>
+        <div id="buckets" style="margin-top: var(--space-md);"></div>
+      </div>
+      <div class="card">
+        <p class="card__title">Jobs</p>
+        <p class="card__metric" id="metric-jobs">—</p>
+        <p class="card__metric-sub">配置・レプリケーション</p>
+        <div id="jobs" style="margin-top: var(--space-md);"></div>
+      </div>
+    </div>
+    <div class="grid grid--2" style="margin-top: var(--space-lg);">
+      <div class="card">
+        <p class="card__title">Capacity</p>
+        <div id="capacity" class="state--loading">Loading…</div>
+      </div>
+      <div class="card">
+        <p class="card__title">Placement</p>
+        <div id="placement" class="state--loading">Loading…</div>
+      </div>
     </div>
   </main>
   <script src="/static/js/api.js"></script>

@@ -306,6 +306,10 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				if h.authStore != nil && cur != nil {
+					// If AccessKey rotated, remove old key so it doesn't linger.
+					if old := h.setupStore.Get(); old != nil && old.AccessKey != "" && old.AccessKey != cur.AccessKey {
+						h.authStore.Remove(old.AccessKey)
+					}
 					_ = h.authStore.Add(cur.AccessKey, cur.SecretKey)
 				}
 				w.Header().Set("Content-Type", "application/json")

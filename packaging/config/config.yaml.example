@@ -2,8 +2,8 @@
 # Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
 # MiryMesh config example — /etc/mirymesh/config.yaml
 server:
-  listen: "0.0.0.0:9000" # S3: Tailscale 100.114.64.41:9000 or reverse-proxy (port 80) -> 127.0.0.1:9000. Do NOT expose 0.0.0.0:9000 to public; use firewall/Tailscale ACL
-  admin_listen: "0.0.0.0:9001" # Admin: Tailscale 100.114.64.41:9001 or localhost. Do NOT expose 0.0.0.0:9001 to public; keep behind firewall/Tailscale ACL or bind 127.0.0.1:9001
+  listen: "0.0.0.0:9000" # S3: Tailscale <tailscale-ip>:9000 or reverse-proxy (port 80) -> 127.0.0.1:9000. Do NOT expose 0.0.0.0:9000 to public; use firewall/Tailscale ACL
+  admin_listen: "0.0.0.0:9001" # Admin: Tailscale <tailscale-ip>:9001 or localhost. Do NOT expose 0.0.0.0:9001 to public; keep behind firewall/Tailscale ACL or bind 127.0.0.1:9001
   mode: gateway # Master holds no S3 objects; all data lives on DataNodes. "" or "standalone" = master also stores (single-node)
   region: "us-east-1"
   data_dir: "/var/lib/mirymesh"
@@ -14,7 +14,7 @@ auth:
 storage:
   default_policy: "single"
 datanode:
-  listen: "0.0.0.0:9002" # DataNode: Tailscale 100.114.64.41:9002 or localhost. Do NOT expose to public; firewall/Tailscale ACL
+  listen: "0.0.0.0:9002" # DataNode: Tailscale <tailscale-ip>:9002 or localhost. Do NOT expose to public; firewall/Tailscale ACL
   controller_url: "http://127.0.0.1:9000"
   paths: ["/mnt/mirymesh/disk1"]
 log:
