@@ -141,4 +141,5 @@ func (s *SetupStoreDB) UpdatePolicy(policy string) error {
 }
 
 var _ SetupStoreIface = (*SetupStoreDB)(nil)
+
 // File store satisfies the same interface (asserted in handler.go).

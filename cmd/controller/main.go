@@ -208,11 +208,12 @@ func main() {
 	adminMuxWithStatic.Handle("/static/", http.StripPrefix("/static/", staticFS))
 	// Setup wizard redirect: if not initialized, browser hits to / should go to setup.html
 	setupIsNeeded := !setupStore.IsInitialized() && len(cfg.Auth.Credentials) == 0
+	// Catch-all for admin: setup redirect + index fallback
 	adminMuxWithStatic.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if setupIsNeeded {
-			if r.URL.Path == "/static/setup.html" || strings.HasPrefix(r.URL.Path, "/api/admin/setup") {
-				// Allow wizard itself
-			} else {
+		// Uninitialized: redirect browser hits (except setup itself + its API + assets) to setup wizard
+		if setupIsNeeded && r.URL.Path != "/static/setup.html" && !strings.HasPrefix(r.URL.Path, "/api/admin/setup") && !strings.HasPrefix(r.URL.Path, "/static/css/") && !strings.HasPrefix(r.URL.Path, "/static/js/") {
+			// Allow CSS/JS needed by setup.html itself, but redirect other static pages
+			if strings.HasPrefix(r.URL.Path, "/static/") || r.URL.Path == "/" {
 				http.Redirect(w, r, "/static/setup.html", http.StatusFound)
 				return
 			}
@@ -226,7 +227,6 @@ func main() {
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/static/") {
-			// Already handled by staticFS, but fallback
 			http.ServeFile(w, r, filepath.Join(staticDir, strings.TrimPrefix(r.URL.Path, "/static/")))
 			return
 		}

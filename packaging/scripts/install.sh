@@ -211,7 +211,7 @@ if [ "$ROLE" = "master" ] && [ "${SKIP_DB_CHECK:-}" != "1" ]; then
       if [ "$has_pg" = "true" ]; then
         sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='$db_name'" 2>/dev/null | grep -q 1 || sudo -u postgres psql -c "CREATE USER $db_user WITH PASSWORD '$db_pass'; CREATE DATABASE $db_name OWNER $db_user;" 2>/dev/null || log "PostgreSQL create skipped (needs sudo -u postgres or existing DB)"
         log "PostgreSQL DSN will be postgres://$db_user:***@127.0.0.1:5432/$db_name?sslmode=disable"
-        # Save to config later and to setup.json via admin API
+        # Saved to DB via setup (miry_setup.db_dsn_enc) — not plain config
         DB_DSN="postgres://$db_user:$db_pass@127.0.0.1:5432/$db_name?sslmode=disable"
         export DB_DSN
         echo "DSN password: $db_pass (save it!)"
@@ -223,11 +223,6 @@ if [ "$ROLE" = "master" ] && [ "${SKIP_DB_CHECK:-}" != "1" ]; then
         export DB_DSN
         echo "DSN password: $db_pass"
       fi
-    fi
-    # Write DB to config if we have DSN
-    if [ -n "${DB_DSN:-}" ] && [ -f /etc/mirymesh/config.yaml ]; then
-      # Will be written after config seeding below
-      :
     fi
   fi
 fi
@@ -244,17 +239,7 @@ if [ ! -f /etc/mirymesh/config.yaml ] && [ -f "$SRC/packaging/config/config.yaml
   chown mirymesh:mirymesh /etc/mirymesh 2>/dev/null || true
   chown mirymesh:mirymesh /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
   log "Created /etc/mirymesh/config.yaml from example (0600)"
-  if [ -n "${DB_DSN:-}" ]; then
-    driver="${db_driver:-postgres}"
-    # Write db section
-    if grep -q "^db:" /etc/mirymesh/config.yaml 2>/dev/null; then
-      # Replace existing db block naively: remove old driver/dsn lines then append
-      sed -i "/^db:/,/^[^ ]/ { /driver:/d; /dsn:/d; }" /etc/mirymesh/config.yaml 2>/dev/null || true
-      # Append under db:
-      awk -v drv="$driver" -v dsn="$DB_DSN" 'BEGIN{p=0} /^db:/{print; print "  driver: \"" drv "\""; print "  dsn: \"" dsn "\""; p=1; next} p && /^[^ ]/{p=0} !p' /etc/mirymesh/config.yaml > /tmp/mirymesh-config.tmp 2>/dev/null && cat /tmp/mirymesh-config.tmp > /etc/mirymesh/config.yaml 2>/dev/null || true
-      log "Wrote db.driver/dsn to /etc/mirymesh/config.yaml"
-    fi
-  fi
+
   if [ "${MASTER_GATEWAY:-no}" = "yes" ]; then
     if grep -q "^  mode:" /etc/mirymesh/config.yaml 2>/dev/null; then
       sed -i "s/^  mode:.*/  mode: gateway/" /etc/mirymesh/config.yaml
