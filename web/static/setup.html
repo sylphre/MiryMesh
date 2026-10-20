@@ -71,14 +71,18 @@
             <option value="ALL">ALL</option>
           </select>
         </label>
-        <div class="grid grid--2" style="margin-top: 0;" x-show="!dbConfigured">
-          <label>DB Driver <select name="db_driver" class="input"><option value="">auto</option><option value="postgres">postgres</option><option value="mysql">mysql</option></select></label>
-          <label>Datanode Paths <input name="datanode_paths" class="input" placeholder="/mnt/disk1,/mnt/disk2" x-bind:required="!dbConfigured &amp;&amp; mode!=='gateway'" /></label>
-        </div>
-        <div x-show="!dbConfigured">
-          <label>DB DSN <input name="db_dsn" class="input" placeholder="postgres://..." x-bind:required="!dbConfigured" /></label>
-          <p class="caption">DB が install.sh で作成済みなら非表示になります。</p>
-        </div>
+        <template x-if="!dbConfigured">
+          <div class="grid grid--2" style="margin-top: 0;">
+            <label>DB Driver <select name="db_driver" required><option value="">auto</option><option value="postgres">postgres</option><option value="mysql">mysql</option></select></label>
+            <label>Datanode Paths <input name="datanode_paths" class="input" placeholder="/mnt/disk1,/mnt/disk2" :required="!dbConfigured &amp;&amp; mode!=='gateway'" /></label>
+          </div>
+        </template>
+        <template x-if="!dbConfigured">
+          <div>
+            <label>DB DSN <input name="db_dsn" class="input" placeholder="postgres://..." required /></label>
+            <p class="caption">DB が install.sh で作成済みなら非表示になります。</p>
+          </div>
+        </template>
         <button type="submit" class="btn btn--primary">保存して完了</button>
       </form>
       <div id="done" style="display:none;">
