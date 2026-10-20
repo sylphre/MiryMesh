@@ -31,6 +31,14 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if st := h.setupStore.Get(); st != nil && st.DefaultPolicy != "" {
 		policy = st.DefaultPolicy
 	}
+	mode := "standalone"
+	if st := h.setupStore.Get(); st != nil && st.Gateway {
+		mode = "gateway"
+	}
+	dbConfigured := false
+	if st := h.setupStore.Get(); st != nil && st.DBDriver != "" && st.DBDSN != "" {
+		dbConfigured = true
+	}
 	disks := h.registry.ListDisks()
 	// Collect datanode.paths from disks (unique paths)
 	paths := make([]string, 0, len(disks))
@@ -41,12 +49,11 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 			paths = append(paths, d.Path)
 		}
 	}
-	mode := "standalone"
-	// Try to infer gateway from setupStore extra? For now keep standalone; controller will inject via header if needed.
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"default_policy": policy,
 		"mode":           mode,
+		"db_configured":  dbConfigured,
 		"paths":          paths,
 		"disks":          disks,
 		"initialized":    h.setupStore.IsInitialized(),

@@ -206,11 +206,27 @@ func main() {
 	// Mount admin API
 	adminMuxWithStatic.Handle("/api/admin/", adminMux)
 	// Setup wizard redirect: if not initialized, browser hits to / should go to setup.html
-	isSetupNeeded := func() bool { return !setupStore.IsInitialized() && len(cfg.Auth.Credentials) == 0 }
+	isSetupNeeded := func() bool { return !setupStore.IsInitialized() }
+	hasToken := func(r *http.Request) bool {
+		if r.Header.Get("X-Admin-Token") != "" || r.URL.Query().Get("token") != "" {
+			return true
+		}
+		// Cookie fallback? Not used; localStorage is client-side, so server checks header only.
+		return false
+	}
+	isHTML := func(r *http.Request) bool { return strings.Contains(r.Header.Get("Accept"), "text/html") }
 	// Uninitialized: redirect direct /static/* hits (except setup itself) to setup wizard — wrap static handler
 	staticWithSetup := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isSetupNeeded() && r.URL.Path != "/static/setup.html" && !strings.HasPrefix(r.URL.Path, "/static/css/") && !strings.HasPrefix(r.URL.Path, "/static/js/") && !strings.HasSuffix(r.URL.Path, "/setup.html") {
-			http.Redirect(w, r, "/static/setup.html", http.StatusFound)
+		if isSetupNeeded() {
+			if r.URL.Path == "/static/setup.html" || strings.HasPrefix(r.URL.Path, "/static/css/") || strings.HasPrefix(r.URL.Path, "/static/js/") || strings.HasSuffix(r.URL.Path, "/setup.html") || strings.HasPrefix(r.URL.Path, "/api/admin/setup") {
+				// Allow wizard assets and its API
+			} else if strings.HasPrefix(r.URL.Path, "/static/") {
+				http.Redirect(w, r, "/static/setup.html", http.StatusFound)
+				return
+			}
+		} else if !hasToken(r) && isHTML(r) && strings.HasPrefix(r.URL.Path, "/static/") && r.URL.Path != "/static/login.html" && !strings.HasPrefix(r.URL.Path, "/static/css/") && !strings.HasPrefix(r.URL.Path, "/static/js/") {
+			// Auth gate: initialized but no Token -> redirect to login (HTML only, API stays 401)
+			http.Redirect(w, r, "/static/login.html", http.StatusFound)
 			return
 		}
 		http.StripPrefix("/static/", staticFS).ServeHTTP(w, r)
@@ -219,11 +235,20 @@ func main() {
 	adminMuxWithStatic.Handle("/static/", staticWithSetup)
 	// Catch-all for admin: setup redirect + index fallback
 	adminMuxWithStatic.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			if isSetupNeeded() {
+		if isSetupNeeded() {
+			if r.URL.Path == "/static/setup.html" || strings.HasPrefix(r.URL.Path, "/api/admin/setup") || strings.HasPrefix(r.URL.Path, "/static/css/") || strings.HasPrefix(r.URL.Path, "/static/js/") {
+				// Allow wizard
+			} else {
 				http.Redirect(w, r, "/static/setup.html", http.StatusFound)
 				return
 			}
+		} else if !hasToken(r) && isHTML(r) {
+			if r.URL.Path != "/static/login.html" && !strings.HasPrefix(r.URL.Path, "/api/admin/") {
+				http.Redirect(w, r, "/static/login.html", http.StatusFound)
+				return
+			}
+		}
+		if r.URL.Path == "/" {
 			http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
 			return
 		}

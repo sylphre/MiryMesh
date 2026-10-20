@@ -1,0 +1,33 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. -->
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MiryMesh — Login</title>
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/layout.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+  <script src="/static/js/vendor/alpine.min.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="topbar__title">MiryMesh</h1>
+  </header>
+  <main class="container container--narrow" x-data="{ username: '', password: '', error: '', loading: false }" x-init="if (localStorage.getItem('mirymesh_admin_token')) location.href='/static/index.html'">
+    <div class="card">
+      <h2>Login</h2>
+      <p class="caption" style="margin-top: var(--space-xs);">Admin アカウントでログインしてください。</p>
+      <div x-show="error" x-transition class="state--error" style="margin-top: var(--space-md);" x-text="error"></div>
+      <form @submit.prevent="loading = true; error = ''; fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) }).then(r => { if (!r.ok) throw new Error('invalid credentials'); return r.json(); }).then(j => { localStorage.setItem('mirymesh_admin_token', j.admin_token); location.href='/static/index.html'; }).catch(e => { error = e.message; loading = false; })" class="form form--stack" style="margin-top: var(--space-lg);">
+        <label>Username <input x-model="username" class="input" required minlength="3" placeholder="admin" /></label>
+        <label>Password <input x-model="password" type="password" class="input" required minlength="8" placeholder="••••••••" /></label>
+        <button type="submit" class="btn btn--primary" :disabled="loading" x-text="loading ? '...' : 'ログイン'"></button>
+      </form>
+      <p class="caption" style="margin-top: var(--space-md);">未初期化の場合は <a href="/static/setup.html">Setup</a> へ。</p>
+    </div>
+  </main>
+</body>
+</html>

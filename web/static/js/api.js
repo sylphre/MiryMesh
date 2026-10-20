@@ -6,10 +6,25 @@ const MiryMeshAPI = (() => {
   function escapeHTML(s) {
     return String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
   }
+  async function fetchWithAuth(url, opts = {}) {
+    opts.headers = opts.headers || {};
+    const token = localStorage.getItem("mirymesh_admin_token");
+    if (token) opts.headers["X-Admin-Token"] = token;
+    const res = await fetch(url, opts);
+    if (res.status === 401) {
+      localStorage.removeItem("mirymesh_admin_token");
+      location.href = "/static/login.html";
+      throw new Error("unauthorized");
+    }
+    return res;
+  }
   async function request(method, path, body) {
-    const opts = { method, headers: { "Content-Type": "application/json" } };
+    const token = localStorage.getItem("mirymesh_admin_token") || "";
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers["X-Admin-Token"] = token;
+    const opts = { method, headers };
     if (body !== undefined) opts.body = JSON.stringify(body);
-    const res = await fetch(base + path, opts);
+    const res = await fetchWithAuth(base + path, opts);
     if (!res.ok) {
       const text = await res.text();
       throw new Error(text || res.statusText);
@@ -47,5 +62,6 @@ const MiryMeshAPI = (() => {
     escapeHTML,
     renderState,
     renderTable,
+    fetchWithAuth,
   };
 })();
