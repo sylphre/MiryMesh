@@ -16,31 +16,41 @@ import (
 // For MVP, expose mode via env hint: if disks exist, show standalone.
 
 func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
-	if !h.checkAuth(w, r) {
-		return
-	}
-	if h.setupStore == nil {
-		http.Error(w, "setup not configured", http.StatusInternalServerError)
-		return
-	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	policy := "single"
-	if st := h.setupStore.Get(); st != nil && st.DefaultPolicy != "" {
-		policy = st.DefaultPolicy
-	}
 	mode := "standalone"
-	if st := h.setupStore.Get(); st != nil && st.Gateway {
-		mode = "gateway"
-	}
 	dbConfigured := false
-	if st := h.setupStore.Get(); st != nil && st.DBDriver != "" && st.DBDSN != "" {
-		dbConfigured = true
+	if h.setupStore != nil {
+		if st := h.setupStore.Get(); st != nil {
+			if st.DefaultPolicy != "" {
+				policy = st.DefaultPolicy
+			}
+			if st.Gateway {
+				mode = "gateway"
+			}
+			dbConfigured = st.DBDriver != "" && st.DBDSN != ""
+		}
+	}
+	// isSetupNeeded: if not initialized, return minimal config بدون auth
+	if h.setupStore == nil || !h.setupStore.IsInitialized() {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"default_policy": policy,
+			"mode":           mode,
+			"db_configured":  dbConfigured,
+			"paths":          []string{},
+			"disks":          []interface{}{},
+			"initialized":    h.setupStore != nil && h.setupStore.IsInitialized(),
+		})
+		return
+	}
+	if !h.checkAuth(w, r) {
+		return
 	}
 	disks := h.registry.ListDisks()
-	// Collect datanode.paths from disks (unique paths)
 	paths := make([]string, 0, len(disks))
 	seen := map[string]bool{}
 	for _, d := range disks {
