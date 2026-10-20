@@ -73,7 +73,7 @@
         </label>
         <div class="grid grid--2" style="margin-top: 0;" x-show="!dbConfigured">
           <label>DB Driver <select name="db_driver" class="input"><option value="">auto</option><option value="postgres">postgres</option><option value="mysql">mysql</option></select></label>
-          <label>Datanode Paths <input name="datanode_paths" class="input" placeholder="/mnt/disk1,/mnt/disk2" x-bind:required="!dbConfigured && mode!=='gateway'" /></label>
+          <label>Datanode Paths <input name="datanode_paths" class="input" placeholder="/mnt/disk1,/mnt/disk2" x-bind:required="!dbConfigured &amp;&amp; mode!=='gateway'" /></label>
         </div>
         <div x-show="!dbConfigured">
           <label>DB DSN <input name="db_dsn" class="input" placeholder="postgres://..." x-bind:required="!dbConfigured" /></label>
