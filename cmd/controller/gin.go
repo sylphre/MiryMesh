@@ -178,9 +178,12 @@ func newS3Engine(router *s3api.Router, authStore *auth.Store, cfg config.Config,
 	r.Any("/api/admin/*path", func(c *gin.Context) {
 		c.String(404, "admin API lives on admin port — use that port with X-Admin-Token")
 	})
-	// S3 catch-all with SigV4 middleware
+	// S3 catch-all with SigV4 middleware — must not conflict with /internal/* static routes
 	r.Use(s3AuthMiddleware(authStore))
-	r.Any("/*path", ginWrap(router.HandleHTTP))
+	r.NoRoute(func(c *gin.Context) {
+		// Gin's /*path conflicts with /internal/* static routes, so S3 catch-all is via NoRoute
+		router.HandleHTTP(c.Writer, c.Request)
+	})
 	return r
 }
 

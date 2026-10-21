@@ -5,7 +5,7 @@
 -- 1) Setup — singleton (id=1)
 CREATE TABLE setup (
   id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-  admin_username TEXT NOT NULL,
+  admin_username TEXT NOT NULL UNIQUE,
   admin_password_hash TEXT NOT NULL,
   access_key TEXT NOT NULL,
   secret_key_enc TEXT NOT NULL,
