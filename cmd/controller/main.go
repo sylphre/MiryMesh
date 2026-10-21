@@ -216,6 +216,7 @@ func main() {
 	}
 	s3Router := s3api.NewRouterWithPlacement(store, cfg.Server.Region, resolver)
 	adminHandler := admin.NewWithSetup(reg, store, resolver, jobsStore, internalToken, setupStore, authStore)
+	adminHandler.SetDBConfig(cfg.DB.Driver, cfg.DB.DSN)
 	s3api.SetMetricsRecorder(func(isGet bool, bytes int64) {
 		if isGet {
 			adminHandler.Metrics().RecordGet(bytes)

@@ -35,6 +35,8 @@ type Handler struct {
 	setupStore SetupStoreIface
 	authStore  *auth.Store
 	metrics    *Metrics
+	dbDriver   string
+	dbDSN      string
 }
 
 // New creates a Handler.
@@ -49,6 +51,12 @@ func NewWithSetup(reg *datanode.Registry, storage s3api.ObjectStore, resolver *p
 	}
 	metrics := NewMetrics()
 	return &Handler{registry: reg, storage: storage, resolver: resolver, jobs: jobs, adminToken: adminToken, setupStore: setup, authStore: authStore, metrics: metrics}
+}
+
+// SetDBConfig sets the runtime DB driver/DSN for db_configured reporting when setup is not yet initialized.
+func (h *Handler) SetDBConfig(driver, dsn string) {
+	h.dbDriver = driver
+	h.dbDSN = dsn
 }
 
 // Metrics exposes the handler's metrics for s3api recorder wiring.

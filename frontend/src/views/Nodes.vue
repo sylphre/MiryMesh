@@ -7,6 +7,7 @@ const error = ref('')
 const pairCmd = ref('')
 const pairToken = ref('')
 const pairError = ref('')
+const origin = window.location.origin
 
 async function createPairToken() {
   pairError.value = ''
@@ -16,8 +17,7 @@ async function createPairToken() {
     if (!res.ok) throw new Error(await res.text())
     const j = await res.json()
     pairToken.value = j.pair_token
-    const ctrl = location.origin
-    pairCmd.value = `mirymesh-datanode --controller-url ${ctrl} --pair-token ${j.pair_token} --path /mnt/disk1`
+    pairCmd.value = `mirymesh-datanode --controller-url ${origin} --pair-token ${j.pair_token} --path /mnt/disk1`
   } catch (e) {
     pairError.value = e.message
   }
@@ -42,7 +42,7 @@ onMounted(async () => {
     <div v-if="pairCmd" class="card" style="margin-top:12px;">
       <p class="caption">下記を DataNode ホストで実行（pair_token は 15分で失効、1回限り）:</p>
       <code style="display:block;padding:12px;background:var(--color-bg-soft);border-radius:var(--radius);word-break:break-all;">{{ pairCmd }}</code>
-      <p class="caption" style="margin-top:8px;">install.sh: <code>install.sh --client --master-url {{ location.origin }} --pair-token {{ pairToken }}</code></p>
+      <p class="caption" style="margin-top:8px;">install.sh: <code>install.sh --client --master-url {{ origin }} --pair-token {{ pairToken }}</code></p>
     </div>
     <div v-if="pairError" class="state--error" style="margin-top:12px;">{{ pairError }}</div>
     <div v-if="error" class="state--error" style="margin-top:12px;">{{ error }}</div>

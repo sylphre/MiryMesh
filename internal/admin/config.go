@@ -34,6 +34,10 @@ func (h *Handler) handleConfig(w http.ResponseWriter, r *http.Request) {
 			dbConfigured = st.DBDriver != "" && st.DBDSN != ""
 		}
 	}
+	// When not yet initialized, check runtime DB config (e.g. docker-compose MIRYMESH_DB_DSN)
+	if !dbConfigured && (h.dbDriver != "" || h.dbDSN != "") {
+		dbConfigured = h.dbDriver != "" && h.dbDSN != ""
+	}
 	// isSetupNeeded: if not initialized, return minimal config بدون auth
 	if h.setupStore == nil || !h.setupStore.IsInitialized() {
 		w.Header().Set("Content-Type", "application/json")
