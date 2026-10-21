@@ -69,10 +69,10 @@ type LocalStore = Storage
 // primary / MySQL both support). Currently meta is reconstructed from
 // filesystem on GetObject/HeadObject after restart — M1-review #3.
 type Storage struct {
-	mu            sync.RWMutex
-	root          string
-	buckets       map[string]struct{}
-	bucketPolicy  map[string][]byte // bucket -> raw policy JSON
+	mu           sync.RWMutex
+	root         string
+	buckets      map[string]struct{}
+	bucketPolicy map[string][]byte // bucket -> raw policy JSON
 	// meta cache: bucket -> key -> meta
 	meta map[string]map[string]ObjectMeta
 	// multipart in-progress uploads: uploadID -> upload (persisted to disk)
@@ -101,6 +101,11 @@ type PartRecord struct {
 
 // NewStorage creates a storage rooted at dir.
 func NewStorage(root string) (*Storage, error) {
+	return NewStorageWithDB(root, nil, "")
+}
+
+// NewStorageWithDB creates a storage (DB param kept for future bucket persistence; currently in-memory).
+func NewStorageWithDB(root string, _ interface{}, _ string) (*Storage, error) {
 	if strings.TrimSpace(root) == "" {
 		return nil, errors.New("storage root must not be empty")
 	}
@@ -253,7 +258,8 @@ func (s *Storage) DeleteBucket(bucket string) error {
 	return nil
 }
 
-// Bucket policy (S3 ?policy) — in-memory map, persisted via DB when available.
+// Bucket policy (S3 ?policy) — in-memory (DB persistence deferred; buckets themselves are not yet DB-backed).
+// TODO: persist to buckets.policy JSONB when bucket metadata is DB-backed.
 
 func (s *Storage) GetBucketPolicy(bucket string) ([]byte, error) {
 	if err := s.ensureBucketExists(bucket); err != nil {

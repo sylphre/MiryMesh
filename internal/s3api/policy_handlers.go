@@ -101,8 +101,3 @@ func validatePolicyJSON(body []byte) error {
 func errMalformedPolicy(msg string) error {
 	return &s3Error{Code: "MalformedPolicy", Message: msg, HTTPStatus: http.StatusBadRequest}
 }
-
-func init() {
-	// Ensure s3Error handling in writeError — handled via writeXMLError path
-	_ = &s3Error{}
-}

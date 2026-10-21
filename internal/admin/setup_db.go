@@ -31,6 +31,13 @@ func NewSetupStoreDB(db *sql.DB, driver, masterKey string) *SetupStoreDB {
 	return &SetupStoreDB{db: db, driver: strings.ToLower(driver), masterKey: masterKey}
 }
 
+func (s *SetupStoreDB) DB() (*sql.DB, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("no db")
+	}
+	return s.db, nil
+}
+
 func (s *SetupStoreDB) isPG() bool { return s.driver == "postgres" || s.driver == "postgresql" }
 func (s *SetupStoreDB) ph(n int) string {
 	if s.isPG() {

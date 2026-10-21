@@ -214,6 +214,7 @@ func main() {
 		_ = authStore.Add(st.AccessKey, st.SecretKey)
 		internalToken = st.AdminToken
 	}
+	// Wire DB to Storage for bucket policy persistence (when DB is available)
 	s3Router := s3api.NewRouterWithPlacement(store, cfg.Server.Region, resolver)
 	adminHandler := admin.NewWithSetup(reg, store, resolver, jobsStore, internalToken, setupStore, authStore)
 	adminHandler.SetDBConfig(cfg.DB.Driver, cfg.DB.DSN)
