@@ -3,6 +3,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useClusterStore } from '../stores/cluster'
 
 const router = useRouter()
 const dbConfigured = ref(false)
@@ -169,6 +170,9 @@ async function submitStep2(e) {
     step.value = 4
     status.value = '完了しました'
     statusClass.value = 'state--success'
+    const store = useClusterStore()
+    store.initialized = true
+    await router.push('/')
   } catch (err) {
     status.value = '保存失敗: ' + err.message
     statusClass.value = 'state--error'
@@ -179,6 +183,13 @@ async function skipS3Keys() {
   accessKey.value = ''
   secretKey.value = ''
   await submitStep2(new Event('submit'))
+}
+
+async function goDash() {
+  const store = useClusterStore()
+  store.initialized = true
+  await store.fetchConfig()
+  await router.push('/')
 }
 </script>
 
@@ -240,15 +251,14 @@ async function skipS3Keys() {
             <option value="ALL">ALL</option>
           </select>
         </label>
-        <!-- DB fields: v-if/v-else で DOM 除去 -->
+        <!-- DB fields: v-if で DOM 除去 — dbConfiguredなら非表示、GatewayならDatanode Pathsも非表示 -->
         <template v-if="!dbConfigured">
-          <div class="grid grid--2" style="margin-top: 0;">
-            <label>DB Driver <select v-model="dbDriver" required><option value="">auto</option><option value="postgres">postgres</option><option value="mysql">mysql</option><option value="sqlite">sqlite</option></select></label>
+          <div :class="isGateway ? '' : 'grid grid--2'" style="margin-top: 0;">
+            <label>DB Driver <select v-model="dbDriver" class="input" required :style="isGateway ? 'max-width: 320px;' : ''"><option value="">auto</option><option value="postgres">postgres</option><option value="mysql">mysql</option><option value="sqlite">sqlite</option></select></label>
             <label v-if="!isGateway">Datanode Paths <input v-model="datanodePaths" class="input" placeholder="/mnt/disk1,/mnt/disk2" required /></label>
           </div>
           <div>
             <label>DB DSN <input v-model="dbDsn" class="input" placeholder="postgres://..." required /></label>
-            <p class="caption">DB が install.sh で作成済みなら非表示になります。</p>
           </div>
         </template>
         <template v-else-if="!isGateway">
@@ -264,7 +274,7 @@ async function skipS3Keys() {
 
       <div v-if="step === 4" style="margin-top: 16px;">
         <p class="state--success">セットアップが完了しました。ダッシュボードへ進んでください。</p>
-        <p style="margin-top: 16px;"><router-link to="/" class="btn btn--primary">ダッシュボードへ</router-link></p>
+        <p style="margin-top: 16px;"><button class="btn btn--primary" @click="goDash">ダッシュボードへ</button></p>
       </div>
     </div>
   </main>
