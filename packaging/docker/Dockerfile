@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
-# MiryMesh Docker — multi-stage, pinned toolchain (synced with go.mod: go 1.22).
-FROM golang:1.22-bookworm AS build
+# MiryMesh Docker — multi-stage, pinned toolchain (synced with go.mod: go 1.26).
+FROM golang:1.26-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

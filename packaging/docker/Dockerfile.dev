@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
-FROM golang:1.22-bookworm
+FROM golang:1.26-bookworm
 RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*
 RUN go install github.com/cosmtrek/air@v1.49.0
 WORKDIR /src
