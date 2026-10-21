@@ -17,6 +17,10 @@ import (
 
 // SetupStoreDB is the DB-backed implementation (DB name mirymesh, tables: setup/sessions/pair_tokens).
 // Sessions: token_hash SHA256, pair_tokens: one-time 15m.
+//
+// setup.admin_token は移行期間の legacy fallback。
+// 将来は sessions(token_hash SHA256, expires_at, revoked) のみに正規化し、
+// setup.admin_token カラムは削除する。現状は両方に書き、ValidateSession を正とする。
 type SetupStoreDB struct {
 	db        *sql.DB
 	driver    string

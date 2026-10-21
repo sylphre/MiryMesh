@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // checkAuth validates X-Admin-Token. Uninitialized => setup POST allowed without token.
@@ -82,30 +84,11 @@ func (h *Handler) AuthMiddleware() func(http.Handler) http.Handler {
 
 // --- Rate limit for login (5/min per IP) ---
 
-var loginLimiter = struct {
-	mu sync.Mutex
-	m  map[string][]time.Time
-}{m: make(map[string][]time.Time)}
+var loginLimiters sync.Map // map[string]*rate.Limiter
 
 func allowLogin(ip string) bool {
-	loginLimiter.mu.Lock()
-	defer loginLimiter.mu.Unlock()
-	now := time.Now()
-	cut := now.Add(-time.Minute)
-	hits := loginLimiter.m[ip]
-	var kept []time.Time
-	for _, t := range hits {
-		if t.After(cut) {
-			kept = append(kept, t)
-		}
-	}
-	if len(kept) >= 5 {
-		loginLimiter.m[ip] = kept
-		return false
-	}
-	kept = append(kept, now)
-	loginLimiter.m[ip] = kept
-	return true
+	v, _ := loginLimiters.LoadOrStore(ip, rate.NewLimiter(rate.Every(time.Minute/5), 5))
+	return v.(*rate.Limiter).Allow()
 }
 
 func clientIP(r *http.Request) string {
