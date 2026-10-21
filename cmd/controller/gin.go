@@ -74,7 +74,11 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 		}
 	}
 	if hasEmbedIndex {
-		r.StaticFS("/assets", http.FS(distFS))
+		if assetsFS, err := fs.Sub(distFS, "assets"); err == nil {
+			r.StaticFS("/assets", http.FS(assetsFS))
+		} else {
+			r.StaticFS("/assets", http.FS(distFS))
+		}
 		// Also serve index.html via embed for SPA
 		r.GET("/", func(c *gin.Context) {
 			if !setupStore.IsInitialized() && isHTML(c) {
