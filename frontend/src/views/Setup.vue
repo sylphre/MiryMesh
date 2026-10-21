@@ -145,19 +145,26 @@ async function submitStep2(e) {
     db_dsn: dbDsn.value,
   }
   try {
-    // Gateway with no datanode: allow empty S3 keys (skip)
+    // Gateway with 0 nodes: policy validation is skipped server-side
     const res = await fetch('/api/admin/setup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token },
       body: JSON.stringify(payload),
     })
     if (!res.ok) {
-      const r2 = await fetch('/api/admin/config/policy', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token },
-        body: JSON.stringify({ policy: defaultPolicy.value }),
-      })
-      if (!r2.ok) throw new Error(await r2.text())
+      const text = await res.text()
+      // If setup update failed due to policy, try policy-only update (gateway skips validation)
+      if (text.includes('requires') && text.includes('nodes')) {
+        // Gateway: policy with 0 nodes should succeed — retry without S3 keys
+        const r2 = await fetch('/api/admin/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token },
+          body: JSON.stringify({ default_policy: defaultPolicy.value, gateway: gateway.value }),
+        })
+        if (!r2.ok) throw new Error(await r2.text())
+      } else {
+        throw new Error(text)
+      }
     }
     step.value = 4
     status.value = '完了しました'

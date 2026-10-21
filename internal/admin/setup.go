@@ -192,6 +192,22 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 				_ = json.NewDecoder(r.Body).Decode(&req2)
 				cur := h.setupStore.Get()
 				if cur != nil {
+					// Gateway with 0 nodes: allow empty S3 keys and skip policy validation
+					isGatewayUpdate := req2.Gateway || cur.Gateway
+					if !isGatewayUpdate && (strings.TrimSpace(req2.AccessKey) != "" || strings.TrimSpace(req2.SecretKey) != "") {
+						if err := validateSetupInput(req2.AccessKey, req2.SecretKey, req2.DefaultPolicy); err != nil {
+							http.Error(w, err.Error(), asStatus(err))
+							return
+						}
+					}
+					if !isGatewayUpdate && req2.DefaultPolicy != "" {
+						if pol, err := placement.ParsePolicy(req2.DefaultPolicy); err == nil {
+							if err := pol.ValidateForCluster(h.registry.OnlineNodeCount()); err != nil {
+								http.Error(w, err.Error(), http.StatusBadRequest)
+								return
+							}
+						}
+					}
 					if strings.TrimSpace(req2.AccessKey) != "" {
 						cur.AccessKey = strings.TrimSpace(req2.AccessKey)
 					}

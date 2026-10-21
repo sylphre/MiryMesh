@@ -94,9 +94,16 @@ func (h *Handler) handleConfigPolicy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), asStatus(err))
 		return
 	}
-	if err := pol.ValidateForCluster(h.registry.OnlineNodeCount()); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	// Gateway nodes don't store data locally — allow policy even with 0 datanodes
+	isGateway := false
+	if st := h.setupStore.Get(); st != nil {
+		isGateway = st.Gateway
+	}
+	if !isGateway {
+		if err := pol.ValidateForCluster(h.registry.OnlineNodeCount()); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	if err := h.setupStore.UpdatePolicy(pol.String()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -144,8 +144,16 @@ func (s *SetupStoreDB) Update(st *SetupState) error {
 		}
 	}
 	// updated_at: postgres now(), sqlite CURRENT_TIMESTAMP, mysql CURRENT_TIMESTAMP all work via CURRENT_TIMESTAMP fallback
+	var dbDriverVal interface{} = st.DBDriver
+	if strings.TrimSpace(st.DBDriver) == "" {
+		dbDriverVal = nil
+	}
+	var dsnEncVal interface{} = dsnEnc
+	if strings.TrimSpace(dsnEnc) == "" {
+		dsnEncVal = nil
+	}
 	_, err = s.db.Exec(fmt.Sprintf(`UPDATE setup SET access_key=%s, secret_key_enc=%s, default_policy=%s, region=%s, gateway=%s, datanode_paths=%s, db_driver=%s, db_dsn_enc=%s, updated_at=CURRENT_TIMESTAMP WHERE id=%s`, s.ph(1), s.ph(2), s.ph(3), s.ph(4), s.ph(5), s.ph(6), s.ph(7), s.ph(8), s.ph(9)),
-		st.AccessKey, skEnc, st.DefaultPolicy, st.Region, st.Gateway, st.DatanodePaths, st.DBDriver, dsnEnc, 1)
+		st.AccessKey, skEnc, st.DefaultPolicy, st.Region, st.Gateway, st.DatanodePaths, dbDriverVal, dsnEncVal, 1)
 	return err
 }
 
