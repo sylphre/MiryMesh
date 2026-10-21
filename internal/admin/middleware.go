@@ -47,17 +47,15 @@ func (h *Handler) checkAuth(w http.ResponseWriter, r *http.Request) bool {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return false
 	}
-	// Prefer DB session validation if available.
+	// Prefer session validation for any store that implements it.
 	if sdb, ok := h.setupStore.(*SetupStoreDB); ok {
 		if sdb.ValidateSession(token) {
 			return true
 		}
-		// Fallback: legacy adminToken direct compare (for setup migration window)
-		if h.adminToken != "" && token == h.adminToken {
+	} else if ms, ok := h.setupStore.(*MemSetupStore); ok {
+		if ms.ValidateSession(token) {
 			return true
 		}
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return false
 	}
 	if h.adminToken != "" && token == h.adminToken {
 		return true

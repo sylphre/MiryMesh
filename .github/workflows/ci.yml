@@ -154,7 +154,7 @@ jobs:
           curl -sf http://127.0.0.1:9001/api/admin/setup/status | grep -q '"initialized":false'
           RESP=$(curl -sf -X POST http://127.0.0.1:9001/api/admin/setup -H "Content-Type: application/json" -d '{"username":"admin","password":"adminpass123"}')
           echo "$RESP"
-          TOKEN=$(echo "$RESP" | jq -r .admin_token); [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]
+          TOKEN=$(echo "$RESP" | jq -r .admin_token); [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "TOKEN empty: $RESP"; cat /tmp/mirymesh.log 2>&1 | tail -20; exit 1; }
           echo "TOKEN=$TOKEN" >> $GITHUB_ENV
           # Login smoke
           RESP2=$(curl -sf -X POST http://127.0.0.1:9001/api/admin/login -H "Content-Type: application/json" -d '{"username":"admin","password":"adminpass123"}')
