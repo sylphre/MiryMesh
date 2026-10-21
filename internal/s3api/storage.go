@@ -5,6 +5,7 @@ package s3api
 
 import (
 	"crypto/md5"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -71,8 +72,10 @@ type LocalStore = Storage
 type Storage struct {
 	mu           sync.RWMutex
 	root         string
+	db           *sql.DB
+	dbDriver     string
 	buckets      map[string]struct{}
-	bucketPolicy map[string][]byte // bucket -> raw policy JSON
+	bucketPolicy map[string][]byte // bucket -> raw policy JSON (fallback when db==nil)
 	// meta cache: bucket -> key -> meta
 	meta map[string]map[string]ObjectMeta
 	// multipart in-progress uploads: uploadID -> upload (persisted to disk)
@@ -104,8 +107,15 @@ func NewStorage(root string) (*Storage, error) {
 	return NewStorageWithDB(root, nil, "")
 }
 
-// NewStorageWithDB creates a storage (DB param kept for future bucket persistence; currently in-memory).
-func NewStorageWithDB(root string, _ interface{}, _ string) (*Storage, error) {
+func (s *Storage) SetDB(db *sql.DB, driver string) {
+	s.mu.Lock()
+	s.db = db
+	s.dbDriver = driver
+	s.mu.Unlock()
+}
+
+// NewStorageWithDB creates a storage with optional DB-backed bucket policy persistence.
+func NewStorageWithDB(root string, db *sql.DB, driver string) (*Storage, error) {
 	if strings.TrimSpace(root) == "" {
 		return nil, errors.New("storage root must not be empty")
 	}
@@ -116,7 +126,7 @@ func NewStorageWithDB(root string, _ interface{}, _ string) (*Storage, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Storage{root: abs, buckets: make(map[string]struct{}), bucketPolicy: make(map[string][]byte), meta: make(map[string]map[string]ObjectMeta), uploads: make(map[string]*MultipartUploadState)}
+	s := &Storage{root: abs, db: db, dbDriver: driver, buckets: make(map[string]struct{}), bucketPolicy: make(map[string][]byte), meta: make(map[string]map[string]ObjectMeta), uploads: make(map[string]*MultipartUploadState)}
 	// Discover existing buckets on disk.
 	entries, err := os.ReadDir(abs)
 	if err != nil {
@@ -205,7 +215,7 @@ func (s *Storage) ensureBucketExists(bucket string) error {
 	return nil
 }
 
-// CreateBucket creates a bucket directory.
+// CreateBucket creates a bucket directory and DB row (if DB available).
 func (s *Storage) CreateBucket(bucket string) error {
 	if !isValidBucketName(bucket) {
 		return errInvalidBucketName
@@ -220,6 +230,18 @@ func (s *Storage) CreateBucket(bucket string) error {
 	}
 	s.buckets[bucket] = struct{}{}
 	s.meta[bucket] = make(map[string]ObjectMeta)
+	if s.db != nil {
+		owner := "admin"
+		// Best-effort: insert bucket row for policy persistence; ignore duplicate
+		if s.dbDriver == "postgres" || s.dbDriver == "postgresql" {
+			_, _ = s.db.Exec("INSERT INTO buckets(name, owner) VALUES($1, $2) ON CONFLICT (name) DO NOTHING", bucket, owner)
+		} else {
+			_, _ = s.db.Exec("INSERT IGNORE INTO buckets(name, owner) VALUES(?, ?)", bucket, owner)
+			if s.dbDriver == "sqlite" || s.dbDriver == "sqlite3" {
+				_, _ = s.db.Exec("INSERT OR IGNORE INTO buckets(name, owner) VALUES(?, ?)", bucket, owner)
+			}
+		}
+	}
 	return nil
 }
 
@@ -255,15 +277,43 @@ func (s *Storage) DeleteBucket(bucket string) error {
 	}
 	delete(s.buckets, bucket)
 	delete(s.meta, bucket)
+	delete(s.bucketPolicy, bucket)
+	if s.db != nil {
+		if s.dbDriver == "postgres" || s.dbDriver == "postgresql" {
+			_, _ = s.db.Exec("DELETE FROM buckets WHERE name=$1", bucket)
+		} else {
+			_, _ = s.db.Exec("DELETE FROM buckets WHERE name=?", bucket)
+		}
+	}
 	return nil
 }
 
-// Bucket policy (S3 ?policy) — in-memory (DB persistence deferred; buckets themselves are not yet DB-backed).
-// TODO: persist to buckets.policy JSONB when bucket metadata is DB-backed.
+// Bucket policy (S3 ?policy) — DB-backed when db != nil, in-memory fallback.
 
 func (s *Storage) GetBucketPolicy(bucket string) ([]byte, error) {
 	if err := s.ensureBucketExists(bucket); err != nil {
 		return nil, err
+	}
+	if s.db != nil {
+		var raw []byte
+		var err error
+		if s.dbDriver == "postgres" || s.dbDriver == "postgresql" {
+			err = s.db.QueryRow("SELECT policy FROM buckets WHERE name=$1", bucket).Scan(&raw)
+		} else {
+			err = s.db.QueryRow("SELECT policy FROM buckets WHERE name=?", bucket).Scan(&raw)
+		}
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, errNoSuchBucket
+			}
+			return nil, err
+		}
+		if raw == nil {
+			return nil, errNoSuchBucketPolicy
+		}
+		out := make([]byte, len(raw))
+		copy(out, raw)
+		return out, nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -280,6 +330,28 @@ func (s *Storage) PutBucketPolicy(bucket string, policyJSON []byte) error {
 	if err := s.ensureBucketExists(bucket); err != nil {
 		return err
 	}
+	if s.db != nil {
+		if s.dbDriver == "postgres" || s.dbDriver == "postgresql" {
+			_, err := s.db.Exec("UPDATE buckets SET policy=$1 WHERE name=$2", string(policyJSON), bucket)
+			if err == nil {
+				cp := make([]byte, len(policyJSON))
+				copy(cp, policyJSON)
+				s.mu.Lock()
+				s.bucketPolicy[bucket] = cp
+				s.mu.Unlock()
+			}
+			return err
+		}
+		_, err := s.db.Exec("UPDATE buckets SET policy=? WHERE name=?", string(policyJSON), bucket)
+		if err == nil {
+			cp := make([]byte, len(policyJSON))
+			copy(cp, policyJSON)
+			s.mu.Lock()
+			s.bucketPolicy[bucket] = cp
+			s.mu.Unlock()
+		}
+		return err
+	}
 	cp := make([]byte, len(policyJSON))
 	copy(cp, policyJSON)
 	s.mu.Lock()
@@ -290,6 +362,32 @@ func (s *Storage) PutBucketPolicy(bucket string, policyJSON []byte) error {
 
 func (s *Storage) DeleteBucketPolicy(bucket string) error {
 	if err := s.ensureBucketExists(bucket); err != nil {
+		return err
+	}
+	if s.db != nil {
+		var cur []byte
+		var err error
+		if s.dbDriver == "postgres" || s.dbDriver == "postgresql" {
+			err = s.db.QueryRow("SELECT policy FROM buckets WHERE name=$1", bucket).Scan(&cur)
+		} else {
+			err = s.db.QueryRow("SELECT policy FROM buckets WHERE name=?", bucket).Scan(&cur)
+		}
+		if err != nil {
+			return errNoSuchBucket
+		}
+		if cur == nil {
+			return errNoSuchBucketPolicy
+		}
+		if s.dbDriver == "postgres" || s.dbDriver == "postgresql" {
+			_, err = s.db.Exec("UPDATE buckets SET policy=NULL WHERE name=$1", bucket)
+		} else {
+			_, err = s.db.Exec("UPDATE buckets SET policy=NULL WHERE name=?", bucket)
+		}
+		if err == nil {
+			s.mu.Lock()
+			delete(s.bucketPolicy, bucket)
+			s.mu.Unlock()
+		}
 		return err
 	}
 	s.mu.Lock()

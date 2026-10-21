@@ -2,4 +2,4 @@
 -- Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
 -- 0002_add_bucket_policy: S3 bucket policy (Misskey public-read etc.)
 
-ALTER TABLE buckets ADD COLUMN policy JSONB;
+ALTER TABLE buckets ADD COLUMN IF NOT EXISTS policy JSONB;
