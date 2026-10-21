@@ -66,7 +66,14 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 	r.Any("/internal/objects/*path", ginWrap(dnHandler.HandleObjects))
 
 	// Static: prefer embed frontend/dist, fallback to filesystem distDir or staticDir
-	if distFS, err := fs.Sub(frontend.Dist, "dist"); err == nil {
+	distFS, distErr := fs.Sub(frontend.Dist, "dist")
+	hasEmbedIndex := false
+	if distErr == nil {
+		if _, err := fs.Stat(distFS, "index.html"); err == nil {
+			hasEmbedIndex = true
+		}
+	}
+	if hasEmbedIndex {
 		r.StaticFS("/assets", http.FS(distFS))
 		// Also serve index.html via embed for SPA
 		r.GET("/", func(c *gin.Context) {
@@ -102,7 +109,7 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 			}
 			c.FileFromFS("/", http.FS(distFS))
 		})
-	} else if fi, err := os.Stat("frontend/dist"); err == nil && fi.IsDir() {
+	} else if hasFilesystemDist() {
 		distDir := "frontend/dist"
 		r.Static("/static", distDir)
 		r.Static("/assets", filepath.Join(distDir, "assets"))
@@ -152,7 +159,7 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 			}
 			c.File(filepath.Join(staticDir, "index.html"))
 		})
-		slog.Warn("frontend/dist not found, serving from filesystem", "dir", staticDir)
+		slog.Warn("frontend/dist not found or empty, serving from filesystem", "dir", staticDir)
 	}
 	return r
 }
@@ -267,6 +274,11 @@ func hasTokenGin(c *gin.Context) bool {
 		return true
 	}
 	return false
+}
+
+func hasFilesystemDist() bool {
+	fi, err := os.Stat("frontend/dist")
+	return err == nil && fi.IsDir()
 }
 
 func migrateFileOnce(dataDir string, dbStore *admin.SetupStoreDB) {
