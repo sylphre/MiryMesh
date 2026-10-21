@@ -24,6 +24,7 @@ func (e APIError) Error() string { return fmt.Sprintf("%s: %s", e.Code, e.Messag
 var (
 	errNoSuchBucket       = APIError{Code: "NoSuchBucket", Message: "The specified bucket does not exist", Status: http.StatusNotFound}
 	errNoSuchKey          = APIError{Code: "NoSuchKey", Message: "The specified key does not exist", Status: http.StatusNotFound}
+	errNoSuchBucketPolicy = APIError{Code: "NoSuchBucketPolicy", Message: "The bucket policy does not exist", Status: http.StatusNotFound}
 	errBucketAlreadyOwned = APIError{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it", Status: http.StatusConflict}
 	errBucketNotEmpty     = APIError{Code: "BucketNotEmpty", Message: "The bucket you tried to delete is not empty", Status: http.StatusConflict}
 	errAccessDenied       = APIError{Code: "AccessDenied", Message: "Access Denied", Status: http.StatusForbidden}
@@ -33,6 +34,15 @@ var (
 	errNotImplemented     = APIError{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", Status: http.StatusNotImplemented}
 	errInsufficient       = APIError{Code: "InsufficientStorage", Message: "Insufficient storage. The placement engine could not place the object.", Status: 507}
 )
+
+// s3Error is for dynamic errors (e.g. MalformedPolicy with custom message).
+type s3Error struct {
+	Code       string
+	Message    string
+	HTTPStatus int
+}
+
+func (e *s3Error) Error() string { return e.Code + ": " + e.Message }
 
 func writeError(w http.ResponseWriter, r *http.Request, apiErr APIError) {
 	if apiErr.Status == 0 {

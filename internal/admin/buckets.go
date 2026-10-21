@@ -5,6 +5,7 @@ package admin
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 
@@ -74,6 +75,14 @@ func (h *Handler) handleBucketSub(w http.ResponseWriter, r *http.Request) {
 		h.handleBucketPolicy(w, r, bucket)
 		return
 	}
+	if parts[1] == "s3-policy" {
+		h.handleS3Policy(w, r, bucket)
+		return
+	}
+	if parts[1] == "objects" {
+		h.handleBucketObjects(w, r, bucket)
+		return
+	}
 	http.NotFound(w, r)
 }
 
@@ -113,4 +122,74 @@ func (h *Handler) handleBucketPolicy(w http.ResponseWriter, r *http.Request, buc
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (h *Handler) handleS3Policy(w http.ResponseWriter, r *http.Request, bucket string) {
+	if !h.storage.BucketExists(bucket) {
+		http.Error(w, "NoSuchBucket", http.StatusNotFound)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		b, err := h.storage.GetBucketPolicy(bucket)
+		if err != nil {
+			http.Error(w, "NoSuchBucketPolicy", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(b)
+	case http.MethodPut:
+		body, err := io.ReadAll(io.LimitReader(r.Body, 20*1024+1))
+		if err != nil {
+			http.Error(w, "MalformedPolicy", http.StatusBadRequest)
+			return
+		}
+		if len(body) > 20*1024 {
+			http.Error(w, "MalformedPolicy: too large (max 20KiB)", http.StatusBadRequest)
+			return
+		}
+		// Validate JSON
+		var doc map[string]any
+		if err := json.Unmarshal(body, &doc); err != nil {
+			http.Error(w, "MalformedPolicy: invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if err := h.storage.PutBucketPolicy(bucket, body); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case http.MethodDelete:
+		if err := h.storage.DeleteBucketPolicy(bucket); err != nil {
+			http.Error(w, "NoSuchBucketPolicy", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *Handler) handleBucketObjects(w http.ResponseWriter, r *http.Request, bucket string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !h.storage.BucketExists(bucket) {
+		http.Error(w, "NoSuchBucket", http.StatusNotFound)
+		return
+	}
+	prefix := r.URL.Query().Get("prefix")
+	res, err := h.storage.ListObjectsV2(bucket, prefix, "", "", 1000)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"bucket":  bucket,
+		"objects": res.Objects,
+		"prefix":  prefix,
+	})
 }

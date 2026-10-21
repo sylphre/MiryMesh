@@ -274,8 +274,9 @@ func main() {
 // gatewayPlaceholder holds bucket meta only when in gateway mode until RemoteStore is wired.
 // It will be replaced with RemoteStore once registry is available.
 type gatewayPlaceholder struct {
-	dataDir string
-	buckets map[string]struct{}
+	dataDir      string
+	buckets      map[string]struct{}
+	bucketPolicy map[string][]byte
 }
 
 func (g *gatewayPlaceholder) CreateBucket(b string) error {
@@ -306,6 +307,43 @@ func (g *gatewayPlaceholder) HeadObject(b, k string) (s3api.ObjectMeta, error) {
 func (g *gatewayPlaceholder) DeleteObject(b, k string) error { return nil }
 func (g *gatewayPlaceholder) ListObjectsV2(b, prefix, delim, cont string, max int) (s3api.ListObjectsV2Result, error) {
 	return s3api.ListObjectsV2Result{}, nil
+}
+func (g *gatewayPlaceholder) GetBucketPolicy(b string) ([]byte, error) {
+	if _, ok := g.buckets[b]; !ok {
+		return nil, fmt.Errorf("NoSuchBucket")
+	}
+	if g.bucketPolicy == nil {
+		return nil, fmt.Errorf("NoSuchBucketPolicy")
+	}
+	p, ok := g.bucketPolicy[b]
+	if !ok {
+		return nil, fmt.Errorf("NoSuchBucketPolicy")
+	}
+	out := make([]byte, len(p))
+	copy(out, p)
+	return out, nil
+}
+func (g *gatewayPlaceholder) PutBucketPolicy(b string, j []byte) error {
+	if _, ok := g.buckets[b]; !ok {
+		return fmt.Errorf("NoSuchBucket")
+	}
+	if g.bucketPolicy == nil {
+		g.bucketPolicy = make(map[string][]byte)
+	}
+	cp := make([]byte, len(j))
+	copy(cp, j)
+	g.bucketPolicy[b] = cp
+	return nil
+}
+func (g *gatewayPlaceholder) DeleteBucketPolicy(b string) error {
+	if _, ok := g.buckets[b]; !ok {
+		return fmt.Errorf("NoSuchBucket")
+	}
+	if _, ok := g.bucketPolicy[b]; !ok {
+		return fmt.Errorf("NoSuchBucketPolicy")
+	}
+	delete(g.bucketPolicy, b)
+	return nil
 }
 func (g *gatewayPlaceholder) CreateMultipartUpload(b, k, ct string, meta map[string]string) (*s3api.MultipartUploadState, error) {
 	return nil, fmt.Errorf("not implemented")

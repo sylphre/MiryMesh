@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/sylphre/MiryMesh/internal/datanode"
@@ -28,7 +29,9 @@ type RemoteStore struct {
 	client *http.Client
 	token  string
 	// local bucket set (controller holds bucket existence)
-	buckets map[string]struct{}
+	buckets      map[string]struct{}
+	bucketPolicy map[string][]byte
+	mu           sync.RWMutex
 }
 
 // NewRemoteStore creates a RemoteStore. buckets may be empty and filled via CreateBucket.
@@ -45,12 +48,13 @@ func NewRemoteStoreWithResolver(reg *datanode.Registry, engine *placement.Engine
 		engine = placement.New(0)
 	}
 	return &RemoteStore{
-		reg:      reg,
-		resolver: resolver,
-		engine:   engine,
-		client:   &http.Client{Timeout: 30 * time.Second},
-		token:    token,
-		buckets:  make(map[string]struct{}),
+		reg:          reg,
+		resolver:     resolver,
+		engine:       engine,
+		client:       &http.Client{Timeout: 30 * time.Second},
+		token:        token,
+		buckets:      make(map[string]struct{}),
+		bucketPolicy: make(map[string][]byte),
 	}
 }
 
@@ -100,6 +104,46 @@ func (r *RemoteStore) FilesystemCapacity() int64         { return 0 }
 func (r *RemoteStore) FilesystemAvail() int64            { return 0 }
 func (r *RemoteStore) FilesystemUsed() int64             { return 0 }
 func (r *RemoteStore) IsOverQuota(additional int64) bool { return false }
+
+func (r *RemoteStore) GetBucketPolicy(bucket string) ([]byte, error) {
+	if _, ok := r.buckets[bucket]; !ok {
+		return nil, errNoSuchBucket
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	b, ok := r.bucketPolicy[bucket]
+	if !ok {
+		return nil, errNoSuchBucketPolicy
+	}
+	out := make([]byte, len(b))
+	copy(out, b)
+	return out, nil
+}
+
+func (r *RemoteStore) PutBucketPolicy(bucket string, policyJSON []byte) error {
+	if _, ok := r.buckets[bucket]; !ok {
+		return errNoSuchBucket
+	}
+	cp := make([]byte, len(policyJSON))
+	copy(cp, policyJSON)
+	r.mu.Lock()
+	r.bucketPolicy[bucket] = cp
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *RemoteStore) DeleteBucketPolicy(bucket string) error {
+	if _, ok := r.buckets[bucket]; !ok {
+		return errNoSuchBucket
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.bucketPolicy[bucket]; !ok {
+		return errNoSuchBucketPolicy
+	}
+	delete(r.bucketPolicy, bucket)
+	return nil
+}
 
 func (r *RemoteStore) selectTargets(bucket string, size int64) ([]placement.Target, error) {
 	policy := placement.PolicySingle

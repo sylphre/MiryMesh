@@ -39,6 +39,10 @@ type ObjectStore interface {
 	HeadObject(bucket, key string) (ObjectMeta, error)
 	DeleteObject(bucket, key string) error
 	ListObjectsV2(bucket, prefix, delimiter, continuationToken string, maxKeys int) (ListObjectsV2Result, error)
+	// bucket policy (S3 ?policy) — raw JSON bytes, validated by handler
+	GetBucketPolicy(bucket string) ([]byte, error)
+	PutBucketPolicy(bucket string, policyJSON []byte) error
+	DeleteBucketPolicy(bucket string) error
 	// multipart
 	CreateMultipartUpload(bucket, key, contentType string, meta map[string]string) (*MultipartUploadState, error)
 	UploadPart(uploadID string, partNumber int, r io.Reader) (PartRecord, error)
@@ -65,9 +69,10 @@ type LocalStore = Storage
 // primary / MySQL both support). Currently meta is reconstructed from
 // filesystem on GetObject/HeadObject after restart — M1-review #3.
 type Storage struct {
-	mu      sync.RWMutex
-	root    string
-	buckets map[string]struct{}
+	mu            sync.RWMutex
+	root          string
+	buckets       map[string]struct{}
+	bucketPolicy  map[string][]byte // bucket -> raw policy JSON
 	// meta cache: bucket -> key -> meta
 	meta map[string]map[string]ObjectMeta
 	// multipart in-progress uploads: uploadID -> upload (persisted to disk)
@@ -106,7 +111,7 @@ func NewStorage(root string) (*Storage, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Storage{root: abs, buckets: make(map[string]struct{}), meta: make(map[string]map[string]ObjectMeta), uploads: make(map[string]*MultipartUploadState)}
+	s := &Storage{root: abs, buckets: make(map[string]struct{}), bucketPolicy: make(map[string][]byte), meta: make(map[string]map[string]ObjectMeta), uploads: make(map[string]*MultipartUploadState)}
 	// Discover existing buckets on disk.
 	entries, err := os.ReadDir(abs)
 	if err != nil {
@@ -245,6 +250,48 @@ func (s *Storage) DeleteBucket(bucket string) error {
 	}
 	delete(s.buckets, bucket)
 	delete(s.meta, bucket)
+	return nil
+}
+
+// Bucket policy (S3 ?policy) — in-memory map, persisted via DB when available.
+
+func (s *Storage) GetBucketPolicy(bucket string) ([]byte, error) {
+	if err := s.ensureBucketExists(bucket); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	b, ok := s.bucketPolicy[bucket]
+	if !ok {
+		return nil, errNoSuchBucketPolicy
+	}
+	out := make([]byte, len(b))
+	copy(out, b)
+	return out, nil
+}
+
+func (s *Storage) PutBucketPolicy(bucket string, policyJSON []byte) error {
+	if err := s.ensureBucketExists(bucket); err != nil {
+		return err
+	}
+	cp := make([]byte, len(policyJSON))
+	copy(cp, policyJSON)
+	s.mu.Lock()
+	s.bucketPolicy[bucket] = cp
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Storage) DeleteBucketPolicy(bucket string) error {
+	if err := s.ensureBucketExists(bucket); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.bucketPolicy[bucket]; !ok {
+		return errNoSuchBucketPolicy
+	}
+	delete(s.bucketPolicy, bucket)
 	return nil
 }
 

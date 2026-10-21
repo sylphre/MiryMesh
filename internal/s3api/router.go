@@ -64,9 +64,9 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// P2 operations that are explicitly NotImplemented in M1.
+	// P2 operations that are explicitly NotImplemented in M1 (except ?policy).
 	q := r.URL.Query()
-	if q.Has("versioning") || q.Has("acl") || q.Has("tagging") || q.Has("policy") || q.Has("cors") || q.Has("lifecycle") || q.Has("analytics") || q.Has("inventory") || q.Has("metrics") || q.Has("retention") || q.Has("legal-hold") || q.Has("select") {
+	if q.Has("versioning") || q.Has("acl") || q.Has("tagging") || q.Has("cors") || q.Has("lifecycle") || q.Has("analytics") || q.Has("inventory") || q.Has("metrics") || q.Has("retention") || q.Has("legal-hold") || q.Has("select") {
 		writeError(w, r, errNotImplemented)
 		return
 	}
@@ -84,6 +84,22 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Bucket-level operations: /{bucket}
 	if isBucketOp && key == "" {
+		// S3 bucket policy
+		if q.Has("policy") {
+			switch r.Method {
+			case http.MethodGet:
+				rt.handleGetBucketPolicy(w, r, bucket)
+				return
+			case http.MethodPut:
+				rt.handlePutBucketPolicy(w, r, bucket)
+				return
+			case http.MethodDelete:
+				rt.handleDeleteBucketPolicy(w, r, bucket)
+				return
+			}
+			writeError(w, r, errNotImplemented)
+			return
+		}
 		switch r.Method {
 		case http.MethodHead:
 			rt.handleHeadBucket(w, r, bucket)
