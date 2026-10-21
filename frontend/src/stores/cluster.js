@@ -8,6 +8,22 @@ export const useClusterStore = defineStore('cluster', () => {
   const metrics = ref(null)
   const loading = ref(false)
   const error = ref('')
+  // Cache for router guard
+  const initialized = ref(null)
+  const dbConfigured = ref(null)
+  const mode = ref('standalone')
+
+  async function fetchConfig() {
+    const token = localStorage.getItem('mirymesh_admin_token') || ''
+    const headers = token ? { 'X-Admin-Token': token } : {}
+    const res = await fetch('/api/admin/config', { headers })
+    if (res.status === 401) return { status: 401 }
+    const j = await res.json().catch(() => ({}))
+    initialized.value = !!j.initialized
+    dbConfigured.value = !!j.db_configured
+    mode.value = j.mode || 'standalone'
+    return { initialized: initialized.value, dbConfigured: dbConfigured.value, mode: mode.value, status: res.status }
+  }
 
   async function fetchCluster() {
     loading.value = true
@@ -33,5 +49,5 @@ export const useClusterStore = defineStore('cluster', () => {
     }
   }
 
-  return { cluster, metrics, loading, error, fetchCluster }
+  return { cluster, metrics, loading, error, initialized, dbConfigured, mode, fetchConfig, fetchCluster }
 })

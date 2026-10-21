@@ -3,7 +3,9 @@
 
 package admin
 
-import "net/http"
+import (
+	"net/http"
+)
 
 // Exported wrappers for Gin integration (gin.go calls these).
 
@@ -24,20 +26,4 @@ func (h *Handler) HandleConfig(w http.ResponseWriter, r *http.Request)          
 func (h *Handler) HandleConfigPolicy(w http.ResponseWriter, r *http.Request)       { h.handleConfigPolicy(w, r) }
 func (h *Handler) CheckAuth(w http.ResponseWriter, r *http.Request) bool           { return h.checkAuth(w, r) }
 
-// Internal datanode handlers (controller side) — delegated
-func (h *Handler) HandleInternalRegister(w http.ResponseWriter, r *http.Request) {
-	// Will be wired via datanode handler; placeholder
-	http.Error(w, "not wired", http.StatusNotImplemented)
-}
-func (h *Handler) HandleInternalHeartbeat(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not wired", http.StatusNotImplemented)
-}
-func (h *Handler) HandleInternalDisks(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not wired", http.StatusNotImplemented)
-}
-func (h *Handler) HandleInternalNodes(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not wired", http.StatusNotImplemented)
-}
-func (h *Handler) HandleInternalEvacuate(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not wired", http.StatusNotImplemented)
-}
+

@@ -61,12 +61,14 @@ func Migrate(db *sql.DB, driver string) error {
 	if _, err := db.Exec(ddl); err != nil {
 		return fmt.Errorf("create migrations table: %w", err)
 	}
+	ph := "?"
+	if isPG {
+		ph = "$1"
+	}
 	for _, name := range entries {
 		var cnt int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE filename=?`, name).Scan(&cnt); err != nil {
-			if err2 := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE filename=$1`, name).Scan(&cnt); err2 != nil {
-				return fmt.Errorf("check migration %s: %w / %w", name, err, err2)
-			}
+		if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE filename=`+ph, name).Scan(&cnt); err != nil {
+			return fmt.Errorf("check migration %s: %w", name, err)
 		}
 		if cnt > 0 {
 			continue
@@ -84,8 +86,8 @@ func Migrate(db *sql.DB, driver string) error {
 		if _, err := db.Exec(sqlText); err != nil {
 			return fmt.Errorf("apply %s: %w", name, err)
 		}
-		if _, err := db.Exec(`INSERT INTO schema_migrations(filename) VALUES (?)`, name); err != nil {
-			_, _ = db.Exec(`INSERT INTO schema_migrations(filename) VALUES ($1)`, name)
+		if _, err := db.Exec(`INSERT INTO schema_migrations(filename) VALUES (`+ph+`)`, name); err != nil {
+			return fmt.Errorf("record migration %s: %w", name, err)
 		}
 	}
 	return nil

@@ -208,12 +208,12 @@ async function skipS3Keys() {
       <form v-if="step === 3" @submit="submitStep2" class="form form--stack" style="margin-top: 16px;">
         <h3>Step 2 — S3 / DB / Storage</h3>
         <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end;">
-          <label>AccessKey <input v-model="accessKey" class="input" :required="!isGateway || hasDatanode" minlength="3" placeholder="TESTKEY" :disabled="isGateway && !hasDatanode" /></label>
-          <button type="button" class="btn btn--sm" @click="genCreds" :disabled="isGateway && !hasDatanode" style="height: 40px;">生成</button>
+          <label>AccessKey <input v-model="accessKey" class="input" placeholder="TESTKEY" /></label>
+          <button type="button" class="btn btn--sm" @click="genCreds" style="height: 40px;">生成</button>
         </div>
         <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end;">
-          <label>SecretKey <input v-model="secretKey" class="input" type="password" :required="!isGateway || hasDatanode" minlength="8" placeholder="8文字以上" :disabled="isGateway && !hasDatanode" /></label>
-          <button type="button" class="btn btn--sm" @click="genCreds" :disabled="isGateway && !hasDatanode" style="height: 40px;">生成</button>
+          <label>SecretKey <input v-model="secretKey" class="input" type="password" placeholder="8文字以上" /></label>
+          <button type="button" class="btn btn--sm" @click="genCreds" style="height: 40px;">生成</button>
         </div>
         <p v-if="isGateway && !hasDatanode" class="caption" style="color: var(--color-warning);">Gateway で DataNode 未登録のため S3 Keys は後で作成できます。「スキップして完了」で進んでください。</p>
         <div class="grid grid--2" style="margin-top: 0;">
@@ -233,7 +233,7 @@ async function skipS3Keys() {
             <option value="ALL">ALL</option>
           </select>
         </label>
-        <!-- DB fields: v-if="!dbConfigured" で DOM から除去 -->
+        <!-- DB fields: v-if/v-else で DOM 除去 -->
         <template v-if="!dbConfigured">
           <div class="grid grid--2" style="margin-top: 0;">
             <label>DB Driver <select v-model="dbDriver" required><option value="">auto</option><option value="postgres">postgres</option><option value="mysql">mysql</option><option value="sqlite">sqlite</option></select></label>
@@ -244,15 +244,14 @@ async function skipS3Keys() {
             <p class="caption">DB が install.sh で作成済みなら非表示になります。</p>
           </div>
         </template>
-        <!-- Gateway: Datanode Paths は DOM除去 -->
-        <template v-if="dbConfigured && !isGateway">
+        <template v-else-if="!isGateway">
           <div>
             <label>Datanode Paths <input v-model="datanodePaths" class="input" placeholder="/mnt/disk1,/mnt/disk2" /></label>
           </div>
         </template>
         <div style="display: flex; gap: 8px;">
           <button type="submit" class="btn btn--primary">保存して完了</button>
-          <button v-if="isGateway && !hasDatanode" type="button" class="btn" @click="skipS3Keys">スキップして完了</button>
+          <button type="button" class="btn" @click="skipS3Keys">スキップして完了</button>
         </div>
       </form>
 

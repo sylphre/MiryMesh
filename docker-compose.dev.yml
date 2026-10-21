@@ -11,7 +11,6 @@ services:
       - .:/src
       - /src/tmp
       - /src/frontend/node_modules
-      - /src/frontend/dist
     environment:
       - MIRYMESH_MASTER_KEY=dev-master-key-32chars-1234567890
       - MIRYMESH_DB_DSN=postgres://mirymesh:mirymesh@db:5432/mirymesh?sslmode=disable

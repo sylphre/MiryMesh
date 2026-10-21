@@ -170,32 +170,35 @@ func main() {
 		setupStore = dbStore
 		slog.Info("controller: setup store: DB (setup)")
 	} else {
-		// Dev: if DB not configured, use in-memory ephemeral store (requires MIRYMESH_DB_DSN or manual setup)
-		// For sqlite dev fallback, try file sqlite
-		fallbackDSN := "file:/var/lib/mirymesh/mirymesh.db?cache=shared&mode=rwc"
-		if v := os.Getenv("MIRYMESH_DB_DSN"); v != "" {
-			fallbackDSN = v
-		}
-		dbConn, openErr := metadata.OpenDB("sqlite", fallbackDSN)
-		if openErr == nil {
-			if migErr := metadata.Migrate(dbConn, "sqlite"); migErr == nil {
-				mk := cfg.Auth.MasterKey
-				if mk == "" {
-					mk = os.Getenv("MIRYMESH_MASTER_KEY")
-				}
-				if mk == "" {
-					mk = "dev-master-key-32chars-1234567890"
-				}
-				dbStore := admin.NewSetupStoreDB(dbConn, "sqlite", mk)
-				migrateFileOnce(cfg.Server.DataDir, dbStore)
-				setupStore = dbStore
-				slog.Info("controller: setup store: DB (sqlite fallback)", "dsn", fallbackDSN)
+		// No DB configured: prod requires explicit DB, dev allows fallback via MIRYMESH_ENV=dev
+		if os.Getenv("MIRYMESH_ENV") == "dev" || os.Getenv("MIRYMESH_DB_DSN") != "" {
+			fallbackDSN := "file:/var/lib/mirymesh/mirymesh.db?cache=shared&mode=rwc"
+			if v := os.Getenv("MIRYMESH_DB_DSN"); v != "" {
+				fallbackDSN = v
 			}
-		}
-		if setupStore == nil {
-			// Last resort: in-memory
-			setupStore = admin.NewMemSetupStore()
-			slog.Warn("controller: setup store: in-memory (no DB) — data will not persist")
+			dbConn, openErr := metadata.OpenDB("sqlite", fallbackDSN)
+			if openErr == nil {
+				if migErr := metadata.Migrate(dbConn, "sqlite"); migErr == nil {
+					mk := cfg.Auth.MasterKey
+					if mk == "" {
+						mk = os.Getenv("MIRYMESH_MASTER_KEY")
+					}
+					if mk == "" {
+						mk = "dev-master-key-32chars-1234567890"
+					}
+					dbStore := admin.NewSetupStoreDB(dbConn, "sqlite", mk)
+					migrateFileOnce(cfg.Server.DataDir, dbStore)
+					setupStore = dbStore
+					slog.Info("controller: setup store: DB (sqlite fallback)", "dsn", fallbackDSN)
+				}
+			}
+			if setupStore == nil {
+				setupStore = admin.NewMemSetupStore()
+				slog.Warn("controller: setup store: in-memory (no DB) — data will not persist")
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "controller: db.driver is empty — set db.driver (postgres/mysql/sqlite) and MIRYMESH_MASTER_KEY")
+			os.Exit(1)
 		}
 	}
 	if st := setupStore.Get(); st != nil && st.Initialized {
@@ -215,7 +218,7 @@ func main() {
 	staticDir := resolveStaticDir()
 	// Gin engines
 	s3Engine := newS3Engine(s3Router, authStore, cfg, reg, internalToken)
-	adminEngine := newAdminEngine(adminHandler, setupStore, staticDir, cfg)
+	adminEngine := newAdminEngine(adminHandler, setupStore, staticDir, cfg, reg, internalToken)
 	_ = s3Engine
 	_ = adminEngine
 

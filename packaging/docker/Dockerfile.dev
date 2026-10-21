@@ -8,5 +8,5 @@ WORKDIR /src
 COPY frontend/package.json frontend/package.json
 RUN cd frontend && npm install
 COPY . .
-RUN cd frontend && npm run build || true
+RUN cd frontend && npm run build
 CMD ["air", "-c", ".air.toml"]

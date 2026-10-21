@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
 import { createRouter, createWebHistory } from 'vue-router'
+import { useClusterStore } from '../stores/cluster'
 
 const routes = [
   { path: '/static/setup.html', redirect: '/setup' },
@@ -22,33 +23,32 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
-  // isSetupNeeded = !IsInitialized() only
-  try {
-    const token = localStorage.getItem('mirymesh_admin_token') || ''
-    const headers = token ? { 'X-Admin-Token': token } : {}
-    const res = await fetch('/api/admin/config', { headers })
-    if (!res.ok && res.status === 401) {
-      // Initialized but no valid token
-      if (to.path === '/setup') return true
-      if (to.path !== '/login') return '/login'
-      return true
+  const store = useClusterStore()
+  const token = localStorage.getItem('mirymesh_admin_token') || ''
+  // Use cached config if available, else fetch
+  let cfg
+  if (store.initialized !== null) {
+    // Check if we need to re-fetch due to 401
+    cfg = { initialized: store.initialized, dbConfigured: store.dbConfigured, mode: store.mode, status: 200 }
+    // If initialized and no token, we know we need login without fetching
+    if (cfg.initialized && !token && to.path !== '/login' && to.path !== '/setup') {
+      return '/login'
     }
-    const j = await res.json().catch(() => ({}))
-    const initialized = !!j.initialized
-    const dbConfigured = !!j.db_configured
-    // Store for setup view
-    sessionStorage.setItem('mirymesh_setup_hint', JSON.stringify({ dbConfigured, mode: j.mode || 'standalone' }))
-    if (!initialized) {
-      if (to.path !== '/setup') return '/setup'
-      return true
-    }
-    // Initialized
-    if (to.path === '/setup') return '/'
-    if (to.meta.requiresAuth && !token) return '/login'
-    return true
-  } catch {
+  } else {
+    cfg = await store.fetchConfig()
+  }
+  if (cfg.status === 401) {
+    if (to.path === '/setup') return true
+    if (to.path !== '/login') return '/login'
     return true
   }
+  if (!cfg.initialized) {
+    if (to.path !== '/setup') return '/setup'
+    return true
+  }
+  if (to.path === '/setup') return '/'
+  if (to.meta.requiresAuth && !token) return '/login'
+  return true
 })
 
 export default router

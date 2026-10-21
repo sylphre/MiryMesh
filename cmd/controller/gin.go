@@ -4,8 +4,9 @@
 package main
 
 import (
-	"embed"
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sylphre/MiryMesh/frontend"
 	"github.com/sylphre/MiryMesh/internal/admin"
 	"github.com/sylphre/MiryMesh/internal/auth"
 	"github.com/sylphre/MiryMesh/internal/config"
@@ -21,9 +23,7 @@ import (
 	"github.com/sylphre/MiryMesh/internal/s3api"
 )
 
-var frontendFS embed.FS
-
-func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDir string, cfg config.Config) *gin.Engine {
+func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDir string, cfg config.Config, reg *datanode.Registry, internalToken string) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -55,15 +55,50 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 	adminG.PUT("/config/policy", ginWrapAuth(h, h.HandleConfigPolicy))
 
 	// Internal datanode (on admin port as well for simplicity; S3 port also serves /internal)
-	r.POST("/internal/register", ginWrap(h.HandleInternalRegister))
-	r.POST("/internal/heartbeat", ginWrap(h.HandleInternalHeartbeat))
-	r.POST("/internal/disks", ginWrap(h.HandleInternalDisks))
-	r.GET("/internal/nodes", ginWrap(h.HandleInternalNodes))
-	r.POST("/internal/evacuate", ginWrap(h.HandleInternalEvacuate))
+	dnHandler := datanode.NewHandler(reg, internalToken)
+	r.POST("/internal/register", ginWrap(dnHandler.HandleRegister))
+	r.POST("/internal/heartbeat", ginWrap(dnHandler.HandleHeartbeat))
+	r.Any("/internal/*path", ginWrap(dnHandler.HandleAny))
 
-	// Static: serve frontend/dist if exists, else fallback to staticDir (web/static or filesystem)
-	distDir := "frontend/dist"
-	if fi, err := os.Stat(distDir); err == nil && fi.IsDir() {
+	// Static: prefer embed frontend/dist, fallback to filesystem distDir or staticDir
+	if distFS, err := fs.Sub(frontend.Dist, "dist"); err == nil {
+		r.StaticFS("/assets", http.FS(distFS))
+		// Also serve index.html via embed for SPA
+		r.GET("/", func(c *gin.Context) {
+			if !setupStore.IsInitialized() && isHTML(c) {
+				c.Redirect(302, "/setup")
+				return
+			}
+			if setupStore.IsInitialized() && !hasTokenGin(c) && isHTML(c) {
+				c.Redirect(302, "/login")
+				return
+			}
+			c.FileFromFS("/", http.FS(distFS))
+		})
+		r.NoRoute(func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/api/") || strings.HasPrefix(c.Request.URL.Path, "/internal/") {
+				c.JSON(404, gin.H{"error": "not found"})
+				return
+			}
+			if strings.HasPrefix(c.Request.URL.Path, "/assets/") {
+				c.Status(404)
+				return
+			}
+			if !setupStore.IsInitialized() && c.Request.URL.Path != "/setup" {
+				if isHTML(c) {
+					c.Redirect(302, "/setup")
+					return
+				}
+			} else if setupStore.IsInitialized() && !hasTokenGin(c) && isHTML(c) {
+				if c.Request.URL.Path != "/login" && c.Request.URL.Path != "/setup" {
+					c.Redirect(302, "/login")
+					return
+				}
+			}
+			c.FileFromFS("/", http.FS(distFS))
+		})
+	} else if fi, err := os.Stat("frontend/dist"); err == nil && fi.IsDir() {
+		distDir := "frontend/dist"
 		r.Static("/static", distDir)
 		r.Static("/assets", filepath.Join(distDir, "assets"))
 		r.GET("/", func(c *gin.Context) {
@@ -77,7 +112,6 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 			}
 			c.File(filepath.Join(distDir, "index.html"))
 		})
-		// SPA fallback: Vue Router history mode
 		r.NoRoute(func(c *gin.Context) {
 			if strings.HasPrefix(c.Request.URL.Path, "/api/") || strings.HasPrefix(c.Request.URL.Path, "/internal/") {
 				c.JSON(404, gin.H{"error": "not found"})
@@ -87,7 +121,6 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 				c.Status(404)
 				return
 			}
-			// Setup/login gating for SPA routes
 			if !setupStore.IsInitialized() && c.Request.URL.Path != "/setup" {
 				if isHTML(c) {
 					c.Redirect(302, "/setup")
@@ -115,7 +148,6 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 			c.File(filepath.Join(staticDir, "index.html"))
 		})
 		slog.Warn("frontend/dist not found, serving from filesystem", "dir", staticDir)
-		_ = frontendFS
 	}
 	return r
 }
@@ -200,9 +232,16 @@ func s3AuthMiddleware(store *auth.Store) gin.HandlerFunc {
 }
 
 func redactedLogger() gin.HandlerFunc {
-	return gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
-		// Redact sensitive headers
-		return ""
+	return gin.LoggerWithFormatter(func(p gin.LogFormatterParams) string {
+		msg := fmt.Sprintf("%s %s %d %s %s\n", p.Method, p.Path, p.StatusCode, p.Latency, p.ClientIP)
+		// Redact token values in log line
+		if tok := p.Request.Header.Get("X-Admin-Token"); tok != "" {
+			msg = strings.ReplaceAll(msg, tok, "***")
+		}
+		if tok := p.Request.URL.Query().Get("token"); tok != "" {
+			msg = strings.ReplaceAll(msg, tok, "***")
+		}
+		return msg
 	})
 }
 
@@ -242,4 +281,4 @@ func migrateFileOnce(dataDir string, dbStore *admin.SetupStoreDB) {
 	slog.Info("migrated setup.json -> DB")
 }
 
-var _ = frontendFS
+

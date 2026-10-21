@@ -277,17 +277,24 @@ else
 fi
 
 if [ "$ROLE" = "client" ] && [ -n "${DATANODE_PATHS:-}" ]; then
+  # Build JSON array once: ["p1","p2",...]
+  _paths_json=""
   for p in $DATANODE_PATHS; do
-    if grep -q "paths:" /etc/mirymesh/config.yaml 2>/dev/null; then
-      # Append to existing paths array (simple: add line)
-      if ! grep -q "\"$p\"" /etc/mirymesh/config.yaml 2>/dev/null; then
-        sed -i "s|paths:.*|paths: [\"$p\"]|" /etc/mirymesh/config.yaml 2>/dev/null || true
-      fi
-    else
-      printf "  paths: [\"%s\"]\n" "$p" >> /etc/mirymesh/config.yaml
-    fi
+    if [ -n "$_paths_json" ]; then _paths_json="$_paths_json, \"$p\""; else _paths_json="\"$p\""; fi
   done
-  log "DataNode paths: $DATANODE_PATHS"
+  _paths_json="[$_paths_json]"
+  if grep -q "paths:" /etc/mirymesh/config.yaml 2>/dev/null; then
+    # Replace whole paths line once
+    sed -i "s|paths:.*|paths: $_paths_json|" /etc/mirymesh/config.yaml 2>/dev/null || true
+  else
+    # Append datanode.paths under datanode section
+    if grep -q "^datanode:" /etc/mirymesh/config.yaml 2>/dev/null; then
+      sed -i "/^datanode:/a\  paths: $_paths_json" /etc/mirymesh/config.yaml 2>/dev/null || printf "  paths: %s\n" "$_paths_json" >> /etc/mirymesh/config.yaml
+    else
+      printf "\ndatanode:\n  paths: %s\n" "$_paths_json" >> /etc/mirymesh/config.yaml
+    fi
+  fi
+  log "DataNode paths: $DATANODE_PATHS -> $_paths_json"
 fi
 if [ "$ROLE" = "client" ] && [ -n "${PAIR_TOKEN:-}" ]; then
   mkdir -p /etc/mirymesh
