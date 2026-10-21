@@ -58,7 +58,12 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 	dnHandler := datanode.NewHandler(reg, internalToken)
 	r.POST("/internal/register", ginWrap(dnHandler.HandleRegister))
 	r.POST("/internal/heartbeat", ginWrap(dnHandler.HandleHeartbeat))
-	r.Any("/internal/*path", ginWrap(dnHandler.HandleAny))
+	r.POST("/internal/disks", ginWrap(dnHandler.HandleDisks))
+	r.GET("/internal/disks", ginWrap(dnHandler.HandleDisks))
+	r.GET("/internal/nodes", ginWrap(dnHandler.HandleNodes))
+	r.POST("/internal/evacuate", ginWrap(dnHandler.HandleEvacuate))
+	r.POST("/internal/restore", ginWrap(dnHandler.HandleRestore))
+	r.Any("/internal/objects/*path", ginWrap(dnHandler.HandleObjects))
 
 	// Static: prefer embed frontend/dist, fallback to filesystem distDir or staticDir
 	if distFS, err := fs.Sub(frontend.Dist, "dist"); err == nil {
@@ -163,7 +168,12 @@ func newS3Engine(router *s3api.Router, authStore *auth.Store, cfg config.Config,
 	dnHandler := datanode.NewHandler(reg, internalToken)
 	r.POST("/internal/register", ginWrap(dnHandler.HandleRegister))
 	r.POST("/internal/heartbeat", ginWrap(dnHandler.HandleHeartbeat))
-	r.Any("/internal/*path", ginWrap(dnHandler.HandleAny))
+	r.POST("/internal/disks", ginWrap(dnHandler.HandleDisks))
+	r.GET("/internal/disks", ginWrap(dnHandler.HandleDisks))
+	r.GET("/internal/nodes", ginWrap(dnHandler.HandleNodes))
+	r.POST("/internal/evacuate", ginWrap(dnHandler.HandleEvacuate))
+	r.POST("/internal/restore", ginWrap(dnHandler.HandleRestore))
+	r.Any("/internal/objects/*path", ginWrap(dnHandler.HandleObjects))
 	// Admin hint on S3 port
 	r.Any("/api/admin/*path", func(c *gin.Context) {
 		c.String(404, "admin API lives on admin port — use that port with X-Admin-Token")

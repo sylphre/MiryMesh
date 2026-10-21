@@ -43,6 +43,13 @@ func main() {
 		cfg = config.Default()
 		slog.Info("controller: config not found, using defaults", "path", cfgPath)
 	}
+	// Env overrides for docker-compose.dev (MIRYMESH_DB_DRIVER / MIRYMESH_DB_DSN)
+	if v := os.Getenv("MIRYMESH_DB_DRIVER"); v != "" && cfg.DB.Driver == "" {
+		cfg.DB.Driver = v
+	}
+	if v := os.Getenv("MIRYMESH_DB_DSN"); v != "" && cfg.DB.DSN == "" {
+		cfg.DB.DSN = v
+	}
 	if vErr := cfg.Validate(); vErr != nil {
 		fmt.Fprintf(os.Stderr, "controller: invalid config: %v\n", vErr)
 		os.Exit(1)
