@@ -60,7 +60,7 @@ type StorageConfig struct {
 }
 
 // AuthConfig holds S3 credential settings for standalone / single-node mode.
-// Setup is now DB-backed (miry_setup.secret_key_enc); config credentials remain for file-mode fallback.
+// Setup is now DB-backed (setup.secret_key_enc); config credentials remain for fallback.
 type AuthConfig struct {
 	Credentials []Credential `yaml:"credentials"`
 	MasterKey   string       `yaml:"master_key"` // 32-byte hex/base64 or >=32 chars; also MIRYMESH_MASTER_KEY env
@@ -94,6 +94,8 @@ var (
 		"postgresql": true,
 		"mysql":      true,
 		"mariadb":    true,
+		"sqlite":     true,
+		"sqlite3":    true,
 	}
 )
 
@@ -234,7 +236,14 @@ func (d DBConfig) validate() error {
 	if d.Driver != "" {
 		normalized := strings.ToLower(strings.TrimSpace(d.Driver))
 		if !validDBDrivers[normalized] {
-			return fmt.Errorf("driver %q must be one of postgres/postgresql/mysql/mariadb", d.Driver)
+			return fmt.Errorf("driver %q must be one of postgres/postgresql/mysql/mariadb/sqlite/sqlite3", d.Driver)
+		}
+		if normalized == "sqlite" || normalized == "sqlite3" {
+			// sqlite DSN may be file: path or :memory: — allow empty? Require DSN.
+			if strings.TrimSpace(d.DSN) == "" {
+				return errors.New("dsn must not be empty when driver is sqlite (e.g. file:/var/lib/mirymesh/mirymesh.db?cache=shared&mode=rwc)")
+			}
+			return nil
 		}
 	}
 	if d.Driver != "" && strings.TrimSpace(d.DSN) == "" {

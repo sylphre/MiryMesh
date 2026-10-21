@@ -5,5 +5,5 @@ tmp_dir = "tmp"
 [build]
   cmd = "go build -buildvcs=false -o ./tmp/mirymesh-controller ./cmd/controller"
   bin = "./tmp/mirymesh-controller /tmp/mirymesh-dev.yaml"
-  include_ext = ["go", "html", "css", "js"]
-  exclude_dir = ["tmp", "design-data", "design-base", "review", "docs"]
+  include_ext = ["go", "html", "css", "js", "vue"]
+  exclude_dir = ["tmp", "design-data", "design-base", "review", "docs", "frontend/node_modules", "frontend/dist"]

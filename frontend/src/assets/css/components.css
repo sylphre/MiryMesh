@@ -1,0 +1,411 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. */
+/* Components: Card / Button / Input / Badge / Table / States. Flat specificity, BEM. */
+
+/* ── Card ── */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.card:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.card--glow:hover {
+  box-shadow: var(--shadow-md), 0 0 20px rgba(56, 189, 248, 0.08);
+}
+
+.card__title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  margin: 0 0 var(--space-md) 0;
+}
+
+.card__metric {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--color-fg);
+}
+
+.card__metric-sub {
+  font-size: 13px;
+  color: var(--color-muted);
+  margin-top: var(--space-xs);
+}
+
+/* ── Button ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: 10px 18px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  min-height: 38px;
+  transition: background 150ms ease, border-color 150ms ease, transform 120ms ease, box-shadow 150ms ease;
+}
+
+.btn:hover {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-strong);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn--primary {
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 14px rgba(56, 189, 248, 0.32);
+}
+
+.btn--primary:hover {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  box-shadow: 0 6px 20px rgba(56, 189, 248, 0.40);
+}
+
+.btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-muted);
+}
+
+.btn--ghost:hover {
+  background: var(--color-soft);
+  color: var(--color-fg);
+}
+
+.btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn--sm {
+  padding: 6px 12px;
+  min-height: 32px;
+  font-size: 12px;
+}
+
+/* ── Input ── */
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg-soft);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.4;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.input::placeholder {
+  color: var(--color-muted);
+}
+
+.input:hover {
+  border-color: var(--color-border-strong);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18);
+  background: var(--color-surface);
+}
+
+.input:disabled {
+  opacity: 0.5;
+}
+
+select.input {
+  cursor: pointer;
+}
+
+/* ── Form ── */
+.form {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.form--stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-fg-secondary);
+}
+
+/* ── Badge ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--color-soft);
+  color: var(--color-muted);
+  border: 1px solid var(--color-border);
+}
+
+.badge--online {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+
+.badge--offline {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border-color: var(--color-error-border);
+}
+
+.badge--policy {
+  background: rgba(56, 189, 248, 0.10);
+  color: var(--color-primary);
+  border-color: rgba(56, 189, 248, 0.20);
+}
+
+/* ── States ── */
+.state--loading {
+  color: var(--color-muted);
+  font-size: 14px;
+}
+
+.state--error {
+  color: var(--color-error);
+  font-size: 14px;
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.state--empty {
+  color: var(--color-muted);
+  font-style: italic;
+  font-size: 14px;
+}
+
+.state--success {
+  color: var(--color-success);
+  font-size: 14px;
+}
+
+/* ── Table (BEM, flat specificity) ── */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th {
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.table td {
+  padding: 11px var(--space-md);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  text-align: left;
+  font-size: 14px;
+  color: var(--color-fg-secondary);
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.table tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* ── Divider ── */
+.divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: var(--space-lg) 0;
+}
+
+/* ── Stepper (Setup 2段階ウィザード) ── */
+.stepper {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-lg);
+}
+
+.stepper__step {
+  flex: 1;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+  transition: background 200ms ease;
+}
+
+.stepper__step--active {
+  background: var(--color-primary);
+}
+
+.stepper__step--done {
+  background: var(--color-success);
+}
+
+/* ── Card stat (MinIO Console high-density, fixed height) ── */
+.card--stat {
+  min-height: 110px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Gauge (SVG circle) ── */
+.gauge {
+  width: var(--gauge-size);
+  height: var(--gauge-size);
+  flex-shrink: 0;
+}
+
+.gauge__track {
+  fill: none;
+  stroke: var(--color-border);
+  stroke-width: 8;
+}
+
+.gauge__value {
+  fill: none;
+  stroke: var(--color-primary);
+  stroke-width: 8;
+  stroke-linecap: round;
+  transition: stroke-dasharray 600ms ease;
+}
+
+/* ── Sparkline (area) ── */
+.sparkline {
+  width: 100%;
+  height: 72px;
+  display: block;
+}
+
+.sparkline__area {
+  fill: rgba(56, 189, 248, 0.12);
+  stroke: var(--color-primary);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* ── Horizontal bar ── */
+.bar-h {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 12px;
+}
+
+.bar-h__label {
+  min-width: 110px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.bar-h__track {
+  flex: 1;
+  height: 8px;
+  background: var(--color-border);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.bar-h__value {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: var(--radius-pill);
+  transition: width 500ms ease;
+}
+
+/* ── Banner (Heal/Scan/Uptime) ── */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--color-success);
+}
+
+/* ── Tabs (MinIO Console Usage/Traffic/...) ── */
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-lg);
+}
+
+.tabs__tab {
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+
+.tabs__tab:hover {
+  color: var(--color-fg);
+}
+
+.tabs__tab--active {
+  color: var(--color-fg);
+  border-bottom-color: var(--color-primary);
+}

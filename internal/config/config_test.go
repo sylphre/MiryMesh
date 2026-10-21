@@ -50,7 +50,8 @@ func TestDBValidate(t *testing.T) {
 		{"postgres with dsn", DBConfig{Driver: "postgres", DSN: "postgres://user:pass@localhost/db?sslmode=disable"}, false},
 		{"mysql with dsn", DBConfig{Driver: "mysql", DSN: "user:pass@tcp(localhost:3306)/mirymesh"}, false},
 		{"mariadb alias", DBConfig{Driver: "mariadb", DSN: "user:pass@tcp(localhost:3306)/mirymesh"}, false},
-		{"unknown driver", DBConfig{Driver: "sqlite", DSN: "file::memory:"}, true},
+		{"sqlite driver", DBConfig{Driver: "sqlite", DSN: "file::memory:"}, false},
+		{"unknown driver", DBConfig{Driver: "oracle", DSN: "file::memory:"}, true},
 		{"driver without dsn", DBConfig{Driver: "postgres", DSN: ""}, true},
 		{"dsn without driver", DBConfig{Driver: "", DSN: "postgres://localhost/db"}, true},
 	}

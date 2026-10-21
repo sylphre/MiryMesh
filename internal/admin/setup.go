@@ -10,21 +10,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/sylphre/MiryMesh/internal/placement"
 	"golang.org/x/crypto/argon2"
 )
 
-// SetupState holds the persisted setup state (MVP: /var/lib/mirymesh/setup.json).
+// SetupState holds the persisted setup state (DB: setup table).
 type SetupState struct {
 	Initialized       bool   `json:"initialized"`
 	AdminUsername     string `json:"admin_username"`
-	AdminPasswordHash string `json:"admin_password_hash"` // argon2id$<salt-hex>$<hash-hex>$time=1,memory=65536,threads=4
+	AdminPasswordHash string `json:"admin_password_hash"`
 	AccessKey         string `json:"access_key"`
 	SecretKey         string `json:"secret_key"`
 	AdminToken        string `json:"admin_token"`
@@ -33,164 +30,13 @@ type SetupState struct {
 	DBDSN             string `json:"db_dsn,omitempty"`
 	Region            string `json:"region,omitempty"`
 	Gateway           bool   `json:"gateway,omitempty"`
-	DatanodePaths     string `json:"datanode_paths,omitempty"` // comma-separated
+	DatanodePaths     string `json:"datanode_paths,omitempty"`
 }
 
-// SetupStoreIfaceUpdater is an optional extension for post-init S3 update.
+// SetupStoreIfaceUpdater is an optional extension for post-init update.
 type SetupStoreIfaceUpdater interface {
 	SetupStoreIface
 	Update(*SetupState) error
-}
-
-// SetupStore manages setup persistence.
-type SetupStore struct {
-	mu    sync.Mutex
-	path  string
-	state *SetupState
-}
-
-// NewSetupStore creates a store. Path defaults to <dataDir>/setup.json.
-func NewSetupStore(dataDir string) *SetupStore {
-	dir := dataDir
-	if dir == "" {
-		dir = "/var/lib/mirymesh"
-	}
-	p := filepath.Join(dir, "setup.json")
-	s := &SetupStore{path: p}
-	s.load()
-	return s
-}
-
-func (s *SetupStore) load() {
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		return
-	}
-	var st SetupState
-	if err := json.Unmarshal(data, &st); err != nil {
-		return
-	}
-	s.state = &st
-}
-
-func (s *SetupStore) IsInitialized() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.state != nil && s.state.Initialized
-}
-
-func (s *SetupStore) Get() *SetupState {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.state == nil {
-		return nil
-	}
-	cpy := *s.state
-	return &cpy
-}
-
-func (s *SetupStore) Save(st *SetupState) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if st.Initialized && s.state != nil && s.state.Initialized {
-		return errAlreadyInitialized
-	}
-	data, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	s.state = st
-	return nil
-}
-
-// UpdatePolicy updates default policy without the already-initialized guard.
-func (s *SetupStore) UpdatePolicy(policy string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.state == nil {
-		s.state = &SetupState{Initialized: true, DefaultPolicy: policy}
-	} else {
-		s.state.DefaultPolicy = policy
-	}
-	data, err := json.MarshalIndent(s.state, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
-}
-
-// Update merges S3/DB fields for the file store (Step2 after init).
-func (s *SetupStore) Update(st *SetupState) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.state == nil {
-		s.state = st
-		s.state.Initialized = true
-	} else {
-		// Merge non-empty fields
-		if st.AccessKey != "" {
-			s.state.AccessKey = st.AccessKey
-		}
-		if st.SecretKey != "" {
-			s.state.SecretKey = st.SecretKey
-		}
-		if st.DefaultPolicy != "" {
-			s.state.DefaultPolicy = st.DefaultPolicy
-		}
-		if st.Region != "" {
-			s.state.Region = st.Region
-		}
-		if st.DatanodePaths != "" {
-			s.state.DatanodePaths = st.DatanodePaths
-		}
-		if st.DBDriver != "" {
-			s.state.DBDriver = st.DBDriver
-		}
-		if st.DBDSN != "" {
-			s.state.DBDSN = st.DBDSN
-		}
-		if st.Gateway {
-			s.state.Gateway = st.Gateway
-		}
-	}
-	data, err := json.MarshalIndent(s.state, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
 }
 
 func generateToken() string {
@@ -230,7 +76,6 @@ func hashPasswordArgon2id(password string) (string, error) {
 }
 
 func verifyPasswordArgon2id(password, stored string) bool {
-	// stored format: argon2id$<salt-hex>$<hash-hex>$t=1,m=65536,p=4  or legacy argon2id$<salt>$<hash>
 	parts := strings.Split(stored, "$")
 	if len(parts) < 3 {
 		return false
@@ -249,7 +94,6 @@ func verifyPasswordArgon2id(password, stored string) bool {
 	return subtle.ConstantTimeCompare(got, expected) == 1
 }
 
-// generateRandomCredential creates a 20-char alphanumeric AccessKey and 32-char SecretKey via crypto/rand.
 func generateRandomCredential() (string, string) {
 	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, 20)
@@ -259,12 +103,11 @@ func generateRandomCredential() (string, string) {
 	}
 	sb := make([]byte, 32)
 	_, _ = rand.Read(sb)
-	// base64-like but hex for simplicity
 	secret := hex.EncodeToString(sb)[:32]
 	return string(b), secret
 }
 
-var _ = strconv.Itoa // keep import
+var _ = strconv.Itoa
 
 var (
 	errAlreadyInitialized = &apiError{Code: 403, Msg: "already initialized"}
@@ -284,6 +127,7 @@ func (h *Handler) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/setup/status", h.handleSetupStatus)
 	mux.HandleFunc("/api/admin/login", h.handleLogin)
 	mux.HandleFunc("/api/admin/generate-credentials", h.handleGenerateCredentials)
+	mux.HandleFunc("/api/admin/pair-token", h.handlePairToken)
 }
 
 func (h *Handler) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
@@ -299,6 +143,28 @@ func (h *Handler) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"initialized": h.setupStore.IsInitialized()})
 }
 
+func (h *Handler) handlePairToken(w http.ResponseWriter, r *http.Request) {
+	if !h.checkAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sdb, ok := h.setupStore.(*SetupStoreDB)
+	if !ok || sdb == nil {
+		http.Error(w, "pair token requires DB setup", http.StatusInternalServerError)
+		return
+	}
+	token, err := sdb.CreatePairToken(15 * 60 * 1e9) // 15m
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"pair_token": token, "expires_in": 900})
+}
+
 func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if h.setupStore == nil {
 		http.Error(w, "setup not configured", http.StatusInternalServerError)
@@ -309,13 +175,10 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		h.handleSetupStatus(w, r)
 	case http.MethodPost:
 		if h.setupStore.IsInitialized() {
-			// Step2: S3/DB config via X-Admin-Token (already initialized)
 			if !h.checkAuth(w, r) {
 				return
 			}
-			// Try Update path (DB) or file Save fallback
 			if updater, ok := h.setupStore.(SetupStoreIfaceUpdater); ok {
-				// Parse same payload and update
 				var req2 struct {
 					AccessKey     string `json:"access_key"`
 					SecretKey     string `json:"secret_key"`
@@ -327,7 +190,6 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 					DBDSN         string `json:"db_dsn"`
 				}
 				_ = json.NewDecoder(r.Body).Decode(&req2)
-				// Build from existing + new values
 				cur := h.setupStore.Get()
 				if cur != nil {
 					if strings.TrimSpace(req2.AccessKey) != "" {
@@ -357,11 +219,7 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 				}
-				if h.authStore != nil && cur != nil {
-					// If AccessKey rotated, remove old key so it doesn't linger.
-					if old := h.setupStore.Get(); old != nil && old.AccessKey != "" && old.AccessKey != cur.AccessKey {
-						h.authStore.Remove(old.AccessKey)
-					}
+				if h.authStore != nil && cur != nil && cur.AccessKey != "" {
 					_ = h.authStore.Add(cur.AccessKey, cur.SecretKey)
 				}
 				w.Header().Set("Content-Type", "application/json")
@@ -395,14 +253,14 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "password must be at least 8 chars", http.StatusBadRequest)
 			return
 		}
-		// Step1 (Admin creation) may omit AccessKey/SecretKey — they come in Step2 via login + S3 config.
-		// Only validate AK/SK if at least one is non-empty.
 		if strings.TrimSpace(req.AccessKey) != "" || strings.TrimSpace(req.SecretKey) != "" {
 			if err := validateSetupInput(req.AccessKey, req.SecretKey, req.DefaultPolicy); err != nil {
 				http.Error(w, err.Error(), asStatus(err))
 				return
 			}
 		}
+		// Gateway + no datanode: S3 keys may be empty — allow empty, but if gateway and no nodes, S3 creation will be 503.
+		// Non-gateway with no datanode and no S3 keys: allow empty as well (keys created later via generate-credentials).
 		policy := req.DefaultPolicy
 		if policy == "" {
 			policy = "single"
@@ -435,9 +293,12 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		// Wire into running services
-		if h.authStore != nil {
+		if h.authStore != nil && st.AccessKey != "" {
 			_ = h.authStore.Add(st.AccessKey, st.SecretKey)
+		}
+		// Create session for the new admin token
+		if sdb, ok := h.setupStore.(*SetupStoreDB); ok {
+			_ = sdb.CreateSession(token, st.AdminUsername, 24*60*60*1e9)
 		}
 		h.adminToken = token
 		if h.resolver != nil && st.DefaultPolicy != "" {
@@ -469,6 +330,10 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !allowLogin(clientIP(r)) {
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
+		return
+	}
 	if !h.setupStore.IsInitialized() {
 		http.Error(w, "not initialized", http.StatusBadRequest)
 		return
@@ -485,6 +350,10 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if st == nil || st.AdminUsername != strings.TrimSpace(req.Username) || !verifyPasswordArgon2id(req.Password, st.AdminPasswordHash) {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
+	}
+	// Issue session if DB-backed
+	if sdb, ok := h.setupStore.(*SetupStoreDB); ok {
+		_ = sdb.CreateSession(st.AdminToken, st.AdminUsername, 24*60*60*1e9)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"admin_token": st.AdminToken})

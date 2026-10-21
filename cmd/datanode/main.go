@@ -5,11 +5,13 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sylphre/MiryMesh/internal/config"
@@ -18,8 +20,16 @@ import (
 )
 
 func main() {
+	var controllerURL, pairToken string
+	var paths multiFlag
+	flag.StringVar(&controllerURL, "controller-url", "", "controller URL (e.g. http://master:9001)")
+	flag.StringVar(&pairToken, "pair-token", "", "one-time pairing token from POST /api/admin/pair-token")
+	flag.Var(&paths, "path", "datanode path (repeatable, e.g. --path /mnt/disk1)")
+	flag.Parse()
 	cfgPath := "/etc/mirymesh/config.yaml"
-	if len(os.Args) > 1 {
+	if flag.NArg() > 0 {
+		cfgPath = flag.Arg(0)
+	} else if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
 		cfgPath = os.Args[1]
 	}
 	var cfg config.Config
@@ -33,6 +43,17 @@ func main() {
 	} else {
 		cfg = config.Default()
 		slog.Info("datanode: config not found, using defaults", "path", cfgPath)
+	}
+	// CLI overrides
+	if controllerURL != "" {
+		cfg.Datanode.ControllerURL = controllerURL
+	}
+	if len(paths) > 0 {
+		cfg.Datanode.Paths = []string(paths)
+	}
+	if pairToken != "" {
+		// Use pair token as internal token for registration
+		cfg.Auth.Credentials = []config.Credential{{AccessKey: "pair", SecretKey: pairToken}}
 	}
 	if vErr := cfg.Validate(); vErr != nil {
 		fmt.Fprintf(os.Stderr, "datanode: invalid config: %v\n", vErr)
@@ -87,4 +108,12 @@ func main() {
 	}()
 	slog.Info("mirymesh-datanode started", "controller", cfg.Datanode.ControllerURL, "paths", cfg.Datanode.Paths)
 	select {}
+}
+
+type multiFlag []string
+
+func (m *multiFlag) String() string { return strings.Join(*m, ",") }
+func (m *multiFlag) Set(v string) error {
+	*m = append(*m, v)
+	return nil
 }

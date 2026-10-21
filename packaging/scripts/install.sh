@@ -34,6 +34,7 @@ if [ -n "${MIRYMESH_ROLE:-}" ]; then
   esac
 fi
 
+PAIR_TOKEN=""
 for arg in "$@"; do
   case "$arg" in
     --master|--controller) ROLE="master" ;;
@@ -43,13 +44,18 @@ for arg in "$@"; do
     --from-source|--source) MODE="from-source" ;;
     --master-url=*) MASTER_URL="${arg#--master-url=}" ;;
     --master-url) echo "usage: --master-url URL" >&2; exit 1 ;;
+    --pair-token=*) PAIR_TOKEN="${arg#--pair-token=}" ;;
+    --pair-token) echo "usage: --pair-token TOKEN" >&2; exit 1 ;;
+    --path=*) DATANODE_PATHS="${DATANODE_PATHS:-} ${arg#--path=}" ;;
     --repo) echo "usage: --repo DIR" >&2; exit 1 ;;
     --repo=*) REPO="${arg#--repo=}" ;;
     --no-enable) NO_ENABLE=1 ;;
     --help|-h)
-      echo "usage: $0 [--master|--client] [--master-url URL] [--deb|--rpm|--from-source] [--repo DIR]"
+      echo "usage: $0 [--master|--client] [--master-url URL] [--pair-token TOKEN] [--path /mnt/disk1] [--deb|--rpm|--from-source] [--repo DIR]"
       echo "  --master   Install as Master (controller, S3 API)"
       echo "  --client   Install as Client/DataNode (needs --master-url or MIRYMESH_MASTER_URL)"
+      echo "  --pair-token  One-time pairing token (from POST /api/admin/pair-token)"
+      echo "  --path     Datanode path (repeatable)"
       echo "  No args    Interactive selection (Master / Client)"
       exit 0
       ;;
@@ -270,9 +276,41 @@ else
   fi
 fi
 
+if [ "$ROLE" = "client" ] && [ -n "${DATANODE_PATHS:-}" ]; then
+  for p in $DATANODE_PATHS; do
+    if grep -q "paths:" /etc/mirymesh/config.yaml 2>/dev/null; then
+      # Append to existing paths array (simple: add line)
+      if ! grep -q "\"$p\"" /etc/mirymesh/config.yaml 2>/dev/null; then
+        sed -i "s|paths:.*|paths: [\"$p\"]|" /etc/mirymesh/config.yaml 2>/dev/null || true
+      fi
+    else
+      printf "  paths: [\"%s\"]\n" "$p" >> /etc/mirymesh/config.yaml
+    fi
+  done
+  log "DataNode paths: $DATANODE_PATHS"
+fi
+if [ "$ROLE" = "client" ] && [ -n "${PAIR_TOKEN:-}" ]; then
+  mkdir -p /etc/mirymesh
+  echo "PAIR_TOKEN=$PAIR_TOKEN" > /etc/mirymesh/datanode.env
+  chmod 0600 /etc/mirymesh/datanode.env
+  # Inject into systemd unit if exists
+  if [ -f /etc/systemd/system/mirymesh-datanode.service ]; then
+    if ! grep -q "EnvironmentFile" /etc/systemd/system/mirymesh-datanode.service 2>/dev/null; then
+      sed -i "/^\[Service\]/a EnvironmentFile=/etc/mirymesh/datanode.env" /etc/systemd/system/mirymesh-datanode.service
+    fi
+    # Update ExecStart to include --pair-token via env
+    if ! grep -q "pair-token" /etc/systemd/system/mirymesh-datanode.service 2>/dev/null; then
+      sed -i "s|ExecStart=.*|ExecStart=/usr/bin/mirymesh-datanode --controller-url $MASTER_URL --pair-token \${PAIR_TOKEN} --path /mnt/disk1|" /etc/systemd/system/mirymesh-datanode.service 2>/dev/null || true
+    fi
+  fi
+  log "Pair token configured"
+fi
 # Edit hint
 if [ "$ROLE" = "client" ]; then
   log "Client/DataNode: also set datanode.paths in /etc/mirymesh/config.yaml to your disk mounts (e.g. [\"/mnt/disk1\"])"
+  if [ -z "${PAIR_TOKEN:-}" ]; then
+    log "Hint: get pair token via: curl -H \"X-Admin-Token: \$ADMIN_TOKEN\" http://master:9001/api/admin/pair-token -X POST"
+  fi
 fi
 
 if command -v systemctl >/dev/null 2>&1; then

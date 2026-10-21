@@ -18,24 +18,44 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// Migrate applies pending migrations. Driver is "postgres" or "mysql"/"mariadb".
-// Uses a simple ad-hoc runner (no goose/golang-migrate): tracks miry_schema_migrations.
+// normalizeDriver returns canonical driver name: postgres/mysql/sqlite.
+func normalizeDriver(d string) string {
+	d = strings.ToLower(strings.TrimSpace(d))
+	if d == "postgresql" {
+		return "postgres"
+	}
+	if d == "mariadb" {
+		return "mysql"
+	}
+	if d == "sqlite3" {
+		return "sqlite"
+	}
+	return d
+}
+
+// Migrate applies pending migrations. Driver is postgres/mysql/sqlite.
 func Migrate(db *sql.DB, driver string) error {
-	driver = strings.ToLower(driver)
-	isPG := driver == "postgres" || driver == "postgresql"
+	driver = normalizeDriver(driver)
+	isPG := driver == "postgres"
+	isSQLite := driver == "sqlite"
 	entries, err := fs.Glob(migrationsFS, "migrations/*.sql")
 	if err != nil {
 		return err
 	}
 	sort.Strings(entries)
-	// Ensure migrations table (dialect-agnostic: keep TEXT/int for compat)
-	ddl := `CREATE TABLE IF NOT EXISTS miry_schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`
-	if !isPG {
+	ddl := `CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`
+	if isSQLite {
+		ddl = `CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`
+	} else if !isPG {
 		ddl = strings.ReplaceAll(ddl, "TIMESTAMPTZ", "TIMESTAMP")
 	}
 	if _, err := db.Exec(ddl); err != nil {
@@ -43,9 +63,8 @@ func Migrate(db *sql.DB, driver string) error {
 	}
 	for _, name := range entries {
 		var cnt int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM miry_schema_migrations WHERE filename=?`, name).Scan(&cnt); err != nil {
-			// Try $1 placeholder for Postgres
-			if err2 := db.QueryRow(`SELECT COUNT(*) FROM miry_schema_migrations WHERE filename=$1`, name).Scan(&cnt); err2 != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE filename=?`, name).Scan(&cnt); err != nil {
+			if err2 := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE filename=$1`, name).Scan(&cnt); err2 != nil {
 				return fmt.Errorf("check migration %s: %w / %w", name, err, err2)
 			}
 		}
@@ -57,14 +76,16 @@ func Migrate(db *sql.DB, driver string) error {
 			return err
 		}
 		sqlText := string(raw)
-		if !isPG {
+		if isSQLite {
+			sqlText = toSqliteDialect(sqlText)
+		} else if !isPG {
 			sqlText = toMySQLDialect(sqlText)
 		}
 		if _, err := db.Exec(sqlText); err != nil {
 			return fmt.Errorf("apply %s: %w", name, err)
 		}
-		if _, err := db.Exec(`INSERT INTO miry_schema_migrations(filename) VALUES (?)`, name); err != nil {
-			_, _ = db.Exec(`INSERT INTO miry_schema_migrations(filename) VALUES ($1)`, name)
+		if _, err := db.Exec(`INSERT INTO schema_migrations(filename) VALUES (?)`, name); err != nil {
+			_, _ = db.Exec(`INSERT INTO schema_migrations(filename) VALUES ($1)`, name)
 		}
 	}
 	return nil
@@ -76,15 +97,26 @@ func toMySQLDialect(s string) string {
 	return s
 }
 
+func toSqliteDialect(s string) string {
+	s = strings.ReplaceAll(s, "JSONB", "JSON")
+	s = strings.ReplaceAll(s, "TIMESTAMPTZ", "DATETIME")
+	// now() -> CURRENT_TIMESTAMP, BOOLEAN -> INTEGER
+	s = strings.ReplaceAll(s, "now()", "CURRENT_TIMESTAMP")
+	s = strings.ReplaceAll(s, "BOOLEAN", "INTEGER")
+	// SMALLINT PRIMARY KEY CHECK(id=1) -> INTEGER PRIMARY KEY CHECK(id=1) for sqlite
+	s = strings.ReplaceAll(s, "SMALLINT PRIMARY KEY", "INTEGER PRIMARY KEY")
+	return s
+}
+
 // --- Master key / AES-GCM at-rest encryption ---
 
 // MasterKeyBytes derives 32-byte AES key from MIRYMESH_MASTER_KEY / auth.master_key.
+// TODO: migrate to argon2.IDKey with stable salt when key rotation is designed.
 func MasterKeyBytes(masterKey string) ([]byte, error) {
 	masterKey = strings.TrimSpace(masterKey)
 	if masterKey == "" {
 		return nil, errors.New("MIRYMESH_MASTER_KEY (or auth.master_key) must be set — required for secret_key_enc/dsn_enc")
 	}
-	// Accept 32/64 hex or raw 32 bytes base64 or plain 32+ chars (argon2 derive to 32)
 	if b, err := hex.DecodeString(masterKey); err == nil && len(b) == 32 {
 		return b, nil
 	}
@@ -92,7 +124,7 @@ func MasterKeyBytes(masterKey string) ([]byte, error) {
 		return b, nil
 	}
 	if len(masterKey) >= 32 {
-		// Derive 32 via SHA256? But need stable: use argon2 with fixed salt? Simpler: SHA256(masterKey) as 32
+		// TODO: use argon2.IDKey([]byte(masterKey), salt, 1, 64*1024, 4, 32) with stable salt
 		h := sha256.Sum256([]byte(masterKey))
 		return h[:], nil
 	}
@@ -144,14 +176,14 @@ func DecryptGCM(key []byte, ciphertextB64 string) (string, error) {
 }
 
 // OpenDB opens the DB from config and returns *sql.DB. Caller must Close.
-// driver is "postgres" or "mysql".
 func OpenDB(driver, dsn string) (*sql.DB, error) {
-	switch strings.ToLower(driver) {
-	case "postgres", "postgresql":
-		// import side-effect via blank import? Caller should import driver.
+	switch normalizeDriver(driver) {
+	case "postgres":
 		return sql.Open("postgres", dsn)
-	case "mysql", "mariadb":
+	case "mysql":
 		return sql.Open("mysql", dsn)
+	case "sqlite":
+		return sql.Open("sqlite3", dsn)
 	default:
 		return nil, fmt.Errorf("unsupported driver %q", driver)
 	}

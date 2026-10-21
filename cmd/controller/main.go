@@ -144,32 +144,58 @@ func main() {
 	}
 	// TODO: GUI will manage bucket_policy at runtime; resolver.SetBucketPolicy is the wire point.
 	jobsStore := replication.NewStore()
-	// Setup store: DB-backed when db configured (M14: replaces setup.json), file otherwise.
-	var setupStore admin.SetupStoreIface = admin.NewSetupStore(cfg.Server.DataDir)
+	// Setup store: DB only (file setup.json廃止). Requires DB configured.
+	var setupStore admin.SetupStoreIface
 	if cfg.DB.Driver != "" {
 		masterKey := cfg.Auth.MasterKey
 		if masterKey == "" {
 			masterKey = os.Getenv("MIRYMESH_MASTER_KEY")
 		}
-		if dbConn, openErr := metadata.OpenDB(cfg.DB.Driver, cfg.DB.DSN); openErr == nil {
-			if migErr := metadata.Migrate(dbConn, cfg.DB.Driver); migErr == nil {
-				dbStore := admin.NewSetupStoreDB(dbConn, cfg.DB.Driver, masterKey)
-				// One-time migration: copy file setup.json -> DB if DB empty and file exists
-				if !dbStore.IsInitialized() {
-					if fs := admin.NewSetupStore(cfg.Server.DataDir); fs.IsInitialized() {
-						if st := fs.Get(); st != nil {
-							_ = dbStore.Save(st)
-							slog.Info("controller: migrated setup.json -> DB (miry_setup)")
-						}
-					}
+		if masterKey == "" {
+			fmt.Fprintln(os.Stderr, "controller: auth.master_key (or MIRYMESH_MASTER_KEY) required when db is configured")
+			os.Exit(1)
+		}
+		dbConn, openErr := metadata.OpenDB(cfg.DB.Driver, cfg.DB.DSN)
+		if openErr != nil {
+			fmt.Fprintf(os.Stderr, "controller: db open: %v\n", openErr)
+			os.Exit(1)
+		}
+		if migErr := metadata.Migrate(dbConn, cfg.DB.Driver); migErr != nil {
+			fmt.Fprintf(os.Stderr, "controller: db migrate: %v\n", migErr)
+			os.Exit(1)
+		}
+		dbStore := admin.NewSetupStoreDB(dbConn, cfg.DB.Driver, masterKey)
+		// One-time migration: if setup.json exists on disk, migrate once then rename
+		migrateFileOnce(cfg.Server.DataDir, dbStore)
+		setupStore = dbStore
+		slog.Info("controller: setup store: DB (setup)")
+	} else {
+		// Dev: if DB not configured, use in-memory ephemeral store (requires MIRYMESH_DB_DSN or manual setup)
+		// For sqlite dev fallback, try file sqlite
+		fallbackDSN := "file:/var/lib/mirymesh/mirymesh.db?cache=shared&mode=rwc"
+		if v := os.Getenv("MIRYMESH_DB_DSN"); v != "" {
+			fallbackDSN = v
+		}
+		dbConn, openErr := metadata.OpenDB("sqlite", fallbackDSN)
+		if openErr == nil {
+			if migErr := metadata.Migrate(dbConn, "sqlite"); migErr == nil {
+				mk := cfg.Auth.MasterKey
+				if mk == "" {
+					mk = os.Getenv("MIRYMESH_MASTER_KEY")
 				}
+				if mk == "" {
+					mk = "dev-master-key-32chars-1234567890"
+				}
+				dbStore := admin.NewSetupStoreDB(dbConn, "sqlite", mk)
+				migrateFileOnce(cfg.Server.DataDir, dbStore)
 				setupStore = dbStore
-				slog.Info("controller: setup store: DB (miry_setup)")
-			} else {
-				slog.Warn("controller: db migrate failed, falling back to file setup", "err", migErr)
+				slog.Info("controller: setup store: DB (sqlite fallback)", "dsn", fallbackDSN)
 			}
-		} else {
-			slog.Warn("controller: db open failed, falling back to file setup", "err", openErr)
+		}
+		if setupStore == nil {
+			// Last resort: in-memory
+			setupStore = admin.NewMemSetupStore()
+			slog.Warn("controller: setup store: in-memory (no DB) — data will not persist")
 		}
 	}
 	if st := setupStore.Get(); st != nil && st.Initialized {
@@ -177,13 +203,7 @@ func main() {
 		internalToken = st.AdminToken
 	}
 	s3Router := s3api.NewRouterWithPlacement(store, cfg.Server.Region, resolver)
-	dnHandler := datanode.NewHandler(reg, internalToken)
-	internalMux := http.NewServeMux()
-	dnHandler.RegisterRoutes(internalMux)
-
 	adminHandler := admin.NewWithSetup(reg, store, resolver, jobsStore, internalToken, setupStore, authStore)
-	adminMux := http.NewServeMux()
-	adminHandler.RegisterRoutes(adminMux)
 	s3api.SetMetricsRecorder(func(isGet bool, bytes int64) {
 		if isGet {
 			adminHandler.Metrics().RecordGet(bytes)
@@ -193,82 +213,11 @@ func main() {
 	})
 
 	staticDir := resolveStaticDir()
-	staticFS := http.FileServer(http.Dir(staticDir))
-
-	// S3 mux: S3 + /internal/ + /healthz only (no admin). Admin requests here get 404 + hint.
-	s3Mux := http.NewServeMux()
-	s3Mux.Handle("/internal/", internalMux)
-	s3Mux.HandleFunc("/api/admin/", func(w http.ResponseWriter, r *http.Request) {
-		slog.Warn("admin API accessed on S3 port — use admin listen", "addr", cfg.Server.AdminListen, "path", r.URL.Path)
-		http.Error(w, "admin API lives on admin port ("+cfg.Server.AdminListen+") — use that port with X-Admin-Token", http.StatusNotFound)
-	})
-	s3Mux.Handle("/healthz", healthHandler())
-	s3Mux.Handle("/health", healthHandler())
-	s3Served := s3api.AuthMiddleware(authStore, s3Router)
-	// S3 catch-all: "/" is pure S3 ListBuckets (no GUI fallback)
-	s3Mux.Handle("/", s3Served)
-
-	// Admin mux: /api/admin/* + /static/* + / + setup redirect. No S3 here.
-	adminMuxWithStatic := http.NewServeMux()
-	// Mount admin API
-	adminMuxWithStatic.Handle("/api/admin/", adminMux)
-	// Setup wizard redirect: if not initialized, browser hits to / should go to setup.html
-	isSetupNeeded := func() bool { return !setupStore.IsInitialized() }
-	hasToken := func(r *http.Request) bool {
-		if r.Header.Get("X-Admin-Token") != "" || r.URL.Query().Get("token") != "" {
-			return true
-		}
-		// Cookie fallback? Not used; localStorage is client-side, so server checks header only.
-		return false
-	}
-	isHTML := func(r *http.Request) bool { return strings.Contains(r.Header.Get("Accept"), "text/html") }
-	// Uninitialized: redirect direct /static/* hits (except setup itself) to setup wizard — wrap static handler
-	staticWithSetup := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isSetupNeeded() {
-			if r.URL.Path == "/static/setup.html" || strings.HasPrefix(r.URL.Path, "/static/css/") || strings.HasPrefix(r.URL.Path, "/static/js/") || strings.HasSuffix(r.URL.Path, "/setup.html") || strings.HasPrefix(r.URL.Path, "/api/admin/setup") {
-				// Allow wizard assets and its API
-			} else if strings.HasPrefix(r.URL.Path, "/static/") {
-				http.Redirect(w, r, "/static/setup.html", http.StatusFound)
-				return
-			}
-		} else if !hasToken(r) && isHTML(r) && strings.HasPrefix(r.URL.Path, "/static/") && r.URL.Path != "/static/login.html" && !strings.HasPrefix(r.URL.Path, "/static/css/") && !strings.HasPrefix(r.URL.Path, "/static/js/") {
-			// Auth gate: initialized but no Token -> redirect to login (HTML only, API stays 401)
-			http.Redirect(w, r, "/static/login.html", http.StatusFound)
-			return
-		}
-		http.StripPrefix("/static/", staticFS).ServeHTTP(w, r)
-	})
-	// Re-register with setup gate
-	adminMuxWithStatic.Handle("/static/", staticWithSetup)
-	// Catch-all for admin: setup redirect + index fallback
-	adminMuxWithStatic.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if isSetupNeeded() {
-			if r.URL.Path == "/static/setup.html" || strings.HasPrefix(r.URL.Path, "/api/admin/setup") || strings.HasPrefix(r.URL.Path, "/static/css/") || strings.HasPrefix(r.URL.Path, "/static/js/") {
-				// Allow wizard
-			} else {
-				http.Redirect(w, r, "/static/setup.html", http.StatusFound)
-				return
-			}
-		} else if !hasToken(r) && isHTML(r) {
-			if r.URL.Path != "/static/login.html" && !strings.HasPrefix(r.URL.Path, "/api/admin/") {
-				http.Redirect(w, r, "/static/login.html", http.StatusFound)
-				return
-			}
-		}
-		if r.URL.Path == "/" {
-			http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
-			return
-		}
-		if r.URL.Path == "/static/" || r.URL.Path == "/static" {
-			http.Redirect(w, r, "/static/index.html", http.StatusFound)
-			return
-		}
-		if strings.HasPrefix(r.URL.Path, "/static/") {
-			http.ServeFile(w, r, filepath.Join(staticDir, strings.TrimPrefix(r.URL.Path, "/static/")))
-			return
-		}
-		http.NotFound(w, r)
-	})
+	// Gin engines
+	s3Engine := newS3Engine(s3Router, authStore, cfg, reg, internalToken)
+	adminEngine := newAdminEngine(adminHandler, setupStore, staticDir, cfg)
+	_ = s3Engine
+	_ = adminEngine
 
 	go func() {
 		ticker := time.NewTicker(reg.HeartbeatInterval())
@@ -289,7 +238,7 @@ func main() {
 	slog.Info("mirymesh-controller: admin listen", "addr", adminListen, "hint", tailscaleIP+":9001; do not expose to public, keep behind firewall/Tailscale ACL")
 	slog.Info("mirymesh-controller: s3 listen", "addr", cfg.Server.Listen, "hint", tailscaleIP+":9000 or reverse-proxy; do not expose to public")
 	slog.Info("mirymesh-controller starting", "listen", cfg.Server.Listen, "dataDir", cfg.Server.DataDir, "region", cfg.Server.Region, "adminListen", adminListen)
-	adminSrv := &http.Server{Addr: adminListen, Handler: adminMuxWithStatic, ReadTimeout: 30 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 120 * time.Second}
+	adminSrv := &http.Server{Addr: adminListen, Handler: adminEngine, ReadTimeout: 30 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 120 * time.Second}
 	go func() {
 		if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("admin listen failed", "err", err)
@@ -298,7 +247,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         cfg.Server.Listen,
-		Handler:      s3Mux,
+		Handler:      s3Engine,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  120 * time.Second,
