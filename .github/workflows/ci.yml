@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.26"
           cache: true
       - name: gofmt
         run: |
@@ -33,10 +33,9 @@ jobs:
       - name: go vet
         run: go vet ./...
       - name: golangci-lint
-        if: false # temporarily skip due to upstream jsonschema timeout, rely on go vet + gofmt
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.62.2
+          version: v2.15.0
           args: --timeout=3m
       - name: go test
         run: go test ./... -count=1 -race
@@ -52,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.26"
           cache: true
       - name: e2e — S3 P0 + SigV4 variants + fault
         run: go test ./tests/e2e/... -count=1 -race -run Test
@@ -65,7 +64,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.26"
           cache: true
       - name: build controller (ephemeral)
         run: go build -o /tmp/mirymesh-controller ./cmd/controller
@@ -94,7 +93,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.26"
           cache: true
       - name: build binaries
         run: go build -trimpath -o /tmp/mirymesh-controller ./cmd/controller && go build -trimpath -o /tmp/mirymesh-datanode ./cmd/datanode && go build -trimpath -o /tmp/mirymesh ./cmd/mirymesh && ls -lh /tmp/mirymesh*
@@ -124,7 +123,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.26"
           cache: true
       - name: install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -178,9 +177,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Debian 12 smoke
-        run: docker run --rm -v $PWD:/src -w /src golang:1.22-bookworm bash -c "go vet ./... && go test ./... -count=1 -short"
+        run: docker run --rm -v $PWD:/src -w /src golang:1.26-bookworm bash -c "go vet ./... && go test ./... -count=1 -short"
       - name: Debian 13 smoke (trixie if available, else bookworm)
-        run: docker run --rm -v $PWD:/src -w /src golang:1.22-bookworm bash -c "go vet ./... && ls packaging/systemd/*.service"
+        run: docker run --rm -v $PWD:/src -w /src golang:1.26-bookworm bash -c "go vet ./... && ls packaging/systemd/*.service"
       - name: AlmaLinux 9 smoke (verify systemd units)
         run: docker run --rm -v $PWD:/src -w /src almalinux:9 bash -c "ls -l packaging/systemd/*.service && echo almalinux9 ok"
       - name: Rocky 9 smoke

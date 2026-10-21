@@ -280,5 +280,3 @@ func migrateFileOnce(dataDir string, dbStore *admin.SetupStoreDB) {
 	_ = os.Rename(p, p+".migrated-"+time.Now().Format("20060102-150405"))
 	slog.Info("migrated setup.json -> DB")
 }
-
-

@@ -324,13 +324,6 @@ func (g *gatewayPlaceholder) FilesystemAvail() int64    { return 0 }
 func (g *gatewayPlaceholder) FilesystemUsed() int64     { return 0 }
 func (g *gatewayPlaceholder) IsOverQuota(int64) bool    { return false }
 
-func healthHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte("ok"))
-	})
-}
-
 func detectTailscaleIP() string {
 	out, err := os.ReadFile("/proc/net/route")
 	_ = out

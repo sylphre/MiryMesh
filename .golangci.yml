@@ -1,18 +1,30 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+version: "2"
 run:
   timeout: 3m
-  go: "1.22"
 linters:
   enable:
     - govet
     - ineffassign
     - misspell
     - unused
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  misspell:
-    locale: US
+  exclusions:
+    presets:
+      - common-false-positives
+    rules:
+      - linters: [errcheck]
+        path: internal/datanode/
+      - linters: [errcheck]
+        path: internal/s3api/
+      - linters: [errcheck]
+        path: tests/
+      - linters: [staticcheck]
+        path: internal/s3api/
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    misspell:
+      locale: US
