@@ -54,12 +54,19 @@ func (s *SetupStoreDB) Get() *SetupState {
 	var st SetupState
 	var skEnc, dsnEnc string
 	var initBool sql.NullBool
-	var adminToken sql.NullString
+	var adminToken, dbDriver, dbDsnEnc sql.NullString
 	q := `SELECT admin_username, admin_password_hash, access_key, secret_key_enc, admin_token, default_policy, region, gateway, db_driver, db_dsn_enc, datanode_paths, initialized FROM setup WHERE id=` + s.ph(1)
 	if err := s.db.QueryRow(q, 1).Scan(
-		&st.AdminUsername, &st.AdminPasswordHash, &st.AccessKey, &skEnc, &adminToken, &st.DefaultPolicy, &st.Region, &st.Gateway, &st.DBDriver, &dsnEnc, &st.DatanodePaths, &initBool,
+		&st.AdminUsername, &st.AdminPasswordHash, &st.AccessKey, &skEnc, &adminToken, &st.DefaultPolicy, &st.Region, &st.Gateway, &dbDriver, &dbDsnEnc, &st.DatanodePaths, &initBool,
 	); err != nil {
 		return nil
+	}
+	if dbDriver.Valid {
+		st.DBDriver = dbDriver.String
+	}
+	dsnEnc = ""
+	if dbDsnEnc.Valid {
+		dsnEnc = dbDsnEnc.String
 	}
 	if adminToken.Valid {
 		st.AdminToken = adminToken.String
@@ -105,9 +112,18 @@ func (s *SetupStoreDB) Save(st *SetupState) error {
 			return err
 		}
 	}
+	// db_driver/dsn_enc may be empty at Step 1 (admin only) — store NULL so CHECK passes
+	var dbDriverVal interface{} = st.DBDriver
+	if strings.TrimSpace(st.DBDriver) == "" {
+		dbDriverVal = nil
+	}
+	var dsnEncVal interface{} = dsnEnc
+	if strings.TrimSpace(dsnEnc) == "" {
+		dsnEncVal = nil
+	}
 	ph1, ph2, ph3, ph4, ph5, ph6, ph7, ph8, ph9, ph10, ph11 := s.ph(1), s.ph(2), s.ph(3), s.ph(4), s.ph(5), s.ph(6), s.ph(7), s.ph(8), s.ph(9), s.ph(10), s.ph(11)
 	_, err = s.db.Exec(fmt.Sprintf(`INSERT INTO setup(id, admin_username, admin_password_hash, access_key, secret_key_enc, admin_token, default_policy, region, gateway, db_driver, db_dsn_enc, datanode_paths, initialized) VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true)`, ph1, ph2, ph3, ph4, ph5, ph6, ph7, ph8, ph9, ph10, ph11),
-		st.AdminUsername, st.AdminPasswordHash, st.AccessKey, skEnc, st.AdminToken, st.DefaultPolicy, st.Region, st.Gateway, st.DBDriver, dsnEnc, st.DatanodePaths)
+		st.AdminUsername, st.AdminPasswordHash, st.AccessKey, skEnc, st.AdminToken, st.DefaultPolicy, st.Region, st.Gateway, dbDriverVal, dsnEncVal, st.DatanodePaths)
 	return err
 }
 

@@ -172,6 +172,22 @@ jobs:
         if: always()
         run: kill $(cat /tmp/mirymesh.pid) 2>/dev/null || true; rm -f /tmp/mirymesh.pid
 
+  compose-smoke:
+    runs-on: ubuntu-24.04
+    needs: packaging
+    steps:
+      - uses: actions/checkout@v4
+      - name: compose setup smoke on postgres
+        run: |
+          docker compose -f docker-compose.dev.yml up --build -d
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:9001/api/admin/setup/status | grep -q initialized && break; sleep 2; done
+          curl -sf http://127.0.0.1:9001/api/admin/setup/status | grep -q '"initialized":false'
+          RESP=$(curl -sf -X POST http://127.0.0.1:9001/api/admin/setup -H "Content-Type: application/json" -d '{"username":"admin","password":"adminpass123"}')
+          echo "$RESP" | grep -q admin_token || (echo "setup failed: $RESP"; docker compose -f docker-compose.dev.yml logs mirymesh-dev 2>&1 | tail -50; exit 1)
+          echo "compose setup ok"
+          docker compose -f docker-compose.dev.yml logs db 2>&1 | tail -20
+          docker compose -f docker-compose.dev.yml down -v
+
   linux-matrix:
     runs-on: ubuntu-24.04
     needs: packaging
