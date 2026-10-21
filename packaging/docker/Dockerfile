@@ -6,11 +6,12 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/mirymesh-controller ./cmd/controller
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/mirymesh-datanode ./cmd/datanode
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/mirymesh ./cmd/mirymesh
+RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/mirymesh-controller ./cmd/controller
+RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/mirymesh-datanode ./cmd/datanode
+RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/mirymesh ./cmd/mirymesh
 
-FROM gcr.io/distroless/static-debian12
+FROM debian:12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/mirymesh-controller /usr/bin/mirymesh-controller
 COPY --from=build /out/mirymesh-datanode /usr/bin/mirymesh-datanode
 COPY --from=build /out/mirymesh /usr/bin/mirymesh

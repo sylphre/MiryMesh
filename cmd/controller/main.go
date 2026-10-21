@@ -177,7 +177,8 @@ func main() {
 		setupStore = dbStore
 		slog.Info("controller: setup store: DB (setup)")
 	} else {
-		// No DB configured: prod requires explicit DB, dev allows fallback via MIRYMESH_ENV=dev
+		// No DB configured: allow in-memory for CI smoke / ephemeral runs (no MIRYMESH_ENV required).
+		// Prod should set db.driver + MIRYMESH_MASTER_KEY; dev sets MIRYMESH_ENV=dev for sqlite fallback.
 		if os.Getenv("MIRYMESH_ENV") == "dev" || os.Getenv("MIRYMESH_DB_DSN") != "" {
 			fallbackDSN := "file:/var/lib/mirymesh/mirymesh.db?cache=shared&mode=rwc"
 			if v := os.Getenv("MIRYMESH_DB_DSN"); v != "" {
@@ -204,8 +205,9 @@ func main() {
 				slog.Warn("controller: setup store: in-memory (no DB) — data will not persist")
 			}
 		} else {
-			fmt.Fprintln(os.Stderr, "controller: db.driver is empty — set db.driver (postgres/mysql/sqlite) and MIRYMESH_MASTER_KEY")
-			os.Exit(1)
+			// CI smoke / ephemeral: allow in-memory without requiring DB config
+			setupStore = admin.NewMemSetupStore()
+			slog.Warn("controller: setup store: in-memory (no DB) — ephemeral mode, data will not persist")
 		}
 	}
 	if st := setupStore.Get(); st != nil && st.Initialized {

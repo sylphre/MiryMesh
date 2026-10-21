@@ -102,8 +102,8 @@ jobs:
       - name: smoke — /setup and /api/admin/setup/status on admin 9001
         run: |
           docker run -d -p 19001:9001 --name mirymesh-smoke mirymesh:ci
-          for i in $(seq 1 15); do curl -sf http://127.0.0.1:19001/api/admin/setup/status | grep -q initialized && break; sleep 1; done
-          curl -sf http://127.0.0.1:19001/api/admin/setup/status | grep -q initialized
+          for i in $(seq 1 15); do curl -sf http://127.0.0.1:19001/api/admin/setup/status | grep -q initialized && break; sleep 1; docker logs mirymesh-smoke 2>&1 | tail -20; sleep 1; done
+          curl -sf http://127.0.0.1:19001/api/admin/setup/status | grep -q initialized || (echo "setup/status failed"; docker logs mirymesh-smoke 2>&1 | tail -50; exit 1)
           curl -sf http://127.0.0.1:19001/setup | grep -q -i "mirymesh\|setup\|MiryMesh" || curl -sf http://127.0.0.1:19001/ | grep -q -i "mirymesh\|setup" || true
           docker rm -f mirymesh-smoke
       - name: nfpm --dry-run (deb/rpm) + goreleaser check
