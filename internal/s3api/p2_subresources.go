@@ -17,8 +17,9 @@ import (
 // live in p2_config.go and CORS enforcement in p2_cors.go. Everything MiryMesh
 // cannot honor for real stays an explicit 501 NotImplemented instead of being
 // silently accepted:
-//   - ?versioning reports "unversioned" and refuses to enable (no version history),
-//   - select.
+//   - ?versioning reports "unversioned" and refuses to enable (no version history).
+//
+// ?select (SelectObjectContent) is implemented in p2_select*.go.
 //
 // ?analytics, ?inventory and ?metrics (bucket level, addressed by ?id=) are
 // persisted the same way; their handlers live in p2_idconfig.go. Object level
@@ -97,6 +98,8 @@ func (rt *Router) handleP2Subresource(w http.ResponseWriter, r *http.Request) bo
 		rt.handleIDConfig(w, r, bucket, sub)
 	case (sub == "retention" || sub == "legal-hold") && objectLevel:
 		rt.handleObjectLock(w, r, bucket, key, sub)
+	case sub == "select" && objectLevel:
+		rt.handleSelect(w, r, bucket, key)
 	default:
 		writeError(w, r, errNotImplemented)
 	}
