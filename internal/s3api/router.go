@@ -67,6 +67,11 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// P2 subresources (?acl/tagging/cors/...): read-side answers, 501 for the
 	// rest — see p2_subresources.go. ?policy is handled further below.
 	q := r.URL.Query()
+	// CORS preflights and Access-Control-* headers come from the bucket's stored
+	// CORS configuration (p2_cors.go).
+	if rt.applyCORS(w, r) {
+		return
+	}
 	if rt.handleP2Subresource(w, r) {
 		return
 	}

@@ -56,6 +56,42 @@ jobs:
       - name: e2e — S3 P0 + SigV4 variants + fault
         run: go test ./tests/e2e/... -count=1 -race -run Test
 
+  mysql-integration:
+    name: mysql-integration (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    needs: lint-test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mysql-8.4
+            image: mysql:8.4
+          - name: mariadb-11
+            image: mariadb:11
+    services:
+      db:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: mirytest
+          MARIADB_ROOT_PASSWORD: mirytest
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized || mysqladmin ping -h 127.0.0.1 -uroot -pmirytest"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: go test against ${{ matrix.name }}
+        env:
+          MIRYMESH_TEST_MYSQL_DSN: root:mirytest@tcp(127.0.0.1:3306)/
+        run: go test ./internal/... -count=1 -timeout=10m
+
   e2e-external:
     runs-on: ubuntu-24.04
     needs: lint-test

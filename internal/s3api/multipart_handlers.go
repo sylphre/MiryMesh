@@ -179,6 +179,10 @@ func (rt *Router) handleCompleteMultipart(w http.ResponseWriter, r *http.Request
 		writeXMLError(w, r, 500, "InternalError", err2.Error())
 		return
 	}
+	// The completed upload is a new object: it must not inherit old tags/ACL.
+	if !rt.commitObjectTags(w, r, bucket, key, "") {
+		return
+	}
 	type resp struct {
 		XMLName  xml.Name `xml:"CompleteMultipartUploadResult"`
 		Xmlns    string   `xml:"xmlns,attr"`

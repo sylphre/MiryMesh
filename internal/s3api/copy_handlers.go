@@ -86,6 +86,26 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 	if ct == "" {
 		ct = "application/octet-stream"
 	}
+	// Tags: COPY (default) carries the source tags over, REPLACE takes x-amz-tagging.
+	// Resolved before the write because the destination may be the source object.
+	destTags := ""
+	if strings.EqualFold(r.Header.Get("X-Amz-Tagging-Directive"), "REPLACE") {
+		t, tagErr := requestTagging(r)
+		if tagErr != nil {
+			writeError(w, r, *tagErr)
+			return
+		}
+		destTags = t
+	} else {
+		doc, found, gerr := rt.subStore().GetSubresource(srcBucket, srcKey, subTagging)
+		if gerr != nil {
+			writeStoreFailure(w, r, gerr)
+			return
+		}
+		if found {
+			destTags = doc
+		}
+	}
 	m, err4 := rt.store.PutObject(destBucket, destKey, ct, dstMeta, rc)
 	if err4 != nil {
 		if apiErr, ok := err4.(APIError); ok {
@@ -97,6 +117,10 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 			return
 		}
 		writeXMLError(w, r, 500, "InternalError", err4.Error())
+		return
+	}
+	// The copy is a new object: reset its subresources and apply the resolved tags.
+	if !rt.commitObjectTags(w, r, destBucket, destKey, destTags) {
 		return
 	}
 	type resp struct {

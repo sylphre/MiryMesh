@@ -95,6 +95,12 @@ func (rt *Router) handleDeleteBucket(w http.ResponseWriter, r *http.Request, buc
 		writeXMLError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
+	// The bucket is gone: its stored acl/tagging/cors/lifecycle documents go with it.
+	// Best effort — a recreated bucket must not inherit them, so failures are not hidden.
+	if perr := rt.subStore().PurgeBucketSubresources(bucket); perr != nil {
+		writeStoreFailure(w, r, perr)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -288,6 +294,12 @@ func (rt *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	// M4: replication writes are attempted before local success is reported. In M4
 	// single-node mode we still write locally first, then replicate to targets if any.
 	// Invariant: existing replica is not deleted until replacement is verified.
+	// x-amz-tagging is validated before the body is consumed.
+	reqTags, reqTagErr := requestTagging(r)
+	if reqTagErr != nil {
+		writeError(w, r, *reqTagErr)
+		return
+	}
 	m, err := rt.store.PutObject(bucket, key, ct, meta, r.Body)
 	if err != nil {
 		if apiErr, ok := err.(APIError); ok {
@@ -300,6 +312,10 @@ func (rt *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 			return
 		}
 		writeXMLError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	// A (re)written object starts without old tags/ACL; apply x-amz-tagging.
+	if !rt.commitObjectTags(w, r, bucket, key, reqTags) {
 		return
 	}
 	if mRecorder != nil {
@@ -428,6 +444,11 @@ func (rt *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 		return
 	}
 	_ = rt.store.DeleteObject(bucket, key)
+	// Stored tags/ACL belong to the deleted object; a later object with the same key starts clean.
+	if perr := rt.subStore().PurgeObjectSubresources(bucket, key); perr != nil {
+		writeStoreFailure(w, r, perr)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

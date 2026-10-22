@@ -248,8 +248,8 @@ onMounted(load)
         <div style="margin-top:16px;">
           <h4>Advanced</h4>
           <p class="caption">Versioning: <span class="badge">Not implemented</span> — S3 ?versioning は 501</p>
-          <p class="caption">Tags: <span class="badge">Not implemented</span> — S3 ?tagging は 501</p>
-          <p class="caption">CORS: <span class="badge">Not implemented</span> — S3 ?cors は 501</p>
+          <p class="caption">Tags: <span class="badge">S3 API</span> — S3 ?tagging で設定（DB に永続化）</p>
+          <p class="caption">CORS: <span class="badge">S3 API</span> — S3 ?cors で設定（DB に永続化）</p>
           <p class="caption">Encryption / Object Lock / Retention: <span class="badge">Not implemented</span></p>
         </div>
       </div>

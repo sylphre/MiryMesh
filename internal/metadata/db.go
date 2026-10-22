@@ -19,12 +19,11 @@ import (
 	"sort"
 	"strings"
 
-	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 )
 
-//go:embed migrations/*.sql
+//go:embed migrations/*.sql migrations/mysql/*.sql
 var migrationsFS embed.FS
 
 // normalizeDriver returns canonical driver name: postgres/mysql/sqlite.
@@ -47,6 +46,10 @@ func Migrate(db *sql.DB, driver string) error {
 	driver = normalizeDriver(driver)
 	isPG := driver == "postgres"
 	isSQLite := driver == "sqlite"
+	isMySQL := driver == "mysql"
+	if !isPG && !isSQLite && !isMySQL {
+		return fmt.Errorf("unsupported driver %q", driver)
+	}
 	entries, err := fs.Glob(migrationsFS, "migrations/*.sql")
 	if err != nil {
 		return err
@@ -55,8 +58,8 @@ func Migrate(db *sql.DB, driver string) error {
 	ddl := `CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`
 	if isSQLite {
 		ddl = `CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`
-	} else if !isPG {
-		ddl = strings.ReplaceAll(ddl, "TIMESTAMPTZ", "TIMESTAMP")
+	} else if isMySQL {
+		ddl = `CREATE TABLE IF NOT EXISTS schema_migrations (filename VARCHAR(255) NOT NULL PRIMARY KEY, applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
 	}
 	if _, err := db.Exec(ddl); err != nil {
 		return fmt.Errorf("create migrations table: %w", err)
@@ -77,14 +80,21 @@ func Migrate(db *sql.DB, driver string) error {
 		if err != nil {
 			return err
 		}
-		sqlText := string(raw)
-		if isSQLite {
-			sqlText = toSqliteDialect(sqlText)
-		} else if !isPG {
-			sqlText = toMySQLDialect(sqlText)
+		stmts := []string{string(raw)}
+		switch {
+		case isSQLite:
+			stmts[0] = toSqliteDialect(stmts[0])
+		case isMySQL:
+			// One statement per Exec (multiStatements is off); hand-written
+			// migrations/mysql/* files override the generic ones.
+			if stmts, err = mysqlMigration(name, raw); err != nil {
+				return err
+			}
 		}
-		if _, err := db.Exec(sqlText); err != nil {
-			return fmt.Errorf("apply %s: %w", name, err)
+		for _, stmt := range stmts {
+			if _, err := db.Exec(stmt); err != nil {
+				return fmt.Errorf("apply %s: %w", name, err)
+			}
 		}
 		if _, err := db.Exec(`INSERT INTO schema_migrations(filename) VALUES (`+ph+`)`, name); err != nil {
 			return fmt.Errorf("record migration %s: %w", name, err)
@@ -93,9 +103,14 @@ func Migrate(db *sql.DB, driver string) error {
 	return nil
 }
 
+// toMySQLDialect is only the mechanical fallback for migrations without a hand-written
+// migrations/mysql/<file> (see mysqlMigration); TestMySQLMigrationsOverrideEveryGenericMigration
+// requires an override for every migration.
 func toMySQLDialect(s string) string {
 	s = strings.ReplaceAll(s, "JSONB", "JSON")
 	s = strings.ReplaceAll(s, "TIMESTAMPTZ", "TIMESTAMP")
+	// MySQL has no "ADD COLUMN IF NOT EXISTS"; schema_migrations already makes each file run once.
+	s = strings.ReplaceAll(s, "ADD COLUMN IF NOT EXISTS", "ADD COLUMN")
 	return s
 }
 
@@ -107,6 +122,8 @@ func toSqliteDialect(s string) string {
 	s = strings.ReplaceAll(s, "BOOLEAN", "INTEGER")
 	// SMALLINT PRIMARY KEY CHECK(id=1) -> INTEGER PRIMARY KEY CHECK(id=1) for sqlite
 	s = strings.ReplaceAll(s, "SMALLINT PRIMARY KEY", "INTEGER PRIMARY KEY")
+	// SQLite has no "ADD COLUMN IF NOT EXISTS"; schema_migrations already makes each file run once.
+	s = strings.ReplaceAll(s, "ADD COLUMN IF NOT EXISTS", "ADD COLUMN")
 	return s
 }
 
@@ -183,7 +200,7 @@ func OpenDB(driver, dsn string) (*sql.DB, error) {
 	case "postgres":
 		return sql.Open("postgres", dsn)
 	case "mysql":
-		return sql.Open("mysql", dsn)
+		return openMySQL(dsn)
 	case "sqlite":
 		return sql.Open("sqlite3", dsn)
 	default:

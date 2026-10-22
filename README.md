@@ -45,7 +45,7 @@ Master: Gin v1.12 で S3 `:9000` / Admin `:9001` / DataNode `:9002`。DB は `po
 
 ## S3 互換
 
-P0 19 ops（`ListBuckets〜ListMultipartUploads`）は全て実装、P1 はほぼ完了、P2 サブリソースは設定を保存できないため、読み取りは実状態を返し（`GET ?versioning` は未バージョニング、`GET ?acl` は owner の `FULL_CONTROL`、`GET ?tagging/?cors/?lifecycle` は未設定）、`DELETE ?tagging/?cors/?lifecycle` は冪等に `204`、`PUT ?acl` は `x-amz-acl: private` のみ受理します。それ以外の書き込みと `analytics/inventory/metrics/retention/legal-hold/select` は `501 NotImplemented`。配置不可は `507 InsufficientStorage`。`PUT/GET/DELETE ?policy` は `20KiB` / `MalformedPolicy` / `NoSuchBucketPolicy` で Misskey/Nextcloud の P0 は in-process と e2e で PASS。詳細は Compatibility を参照。
+P0 19 ops（`ListBuckets〜ListMultipartUploads`）は全て実装、P1 はほぼ完了、P2 のうち `?acl`（canned / grant ヘッダ / ACP ボディ）、`?tagging`、`?cors`、`?lifecycle` は DB の `s3_subresources` テーブル（DB 未接続時はメモリ）に永続化し、入力検証、往復取得、保存済み CORS による preflight 応答と `Access-Control-*` ヘッダ付与に対応します。`x-amz-tagging` は PutObject / CopyObject（`x-amz-tagging-directive`）に追従し、オブジェクトの上書き・削除・マルチパート完了・バケット削除で保存済みの設定を掃除します。`GET ?versioning` は未バージョニングを返し、有効化は `501`。`?versioning` の有効化と `analytics/inventory/metrics/retention/legal-hold/select` は `501 NotImplemented`。配置不可は `507 InsufficientStorage`。`PUT/GET/DELETE ?policy` は `20KiB` / `MalformedPolicy` / `NoSuchBucketPolicy` で Misskey/Nextcloud の P0 は in-process と e2e で PASS。詳細は Compatibility を参照。
 
 ## Configuration
 
@@ -62,6 +62,16 @@ P0 19 ops（`ListBuckets〜ListMultipartUploads`）は全て実装、P1 はほ�
 docker compose -f docker-compose.dev.yml up --build  # air@1.49.0 -buildvcs=false + postgres:16 + NodeSource 24 + .: /src, frontend: npm run build → go:embed all:dist
 docker compose -f docker-compose.dev.yml down -v      # クリーンに消える
 ```
+
+### MySQL / MariaDB テスト
+
+`MIRYMESH_TEST_MYSQL_DSN` を設定すると、MySQL 8.4 / MariaDB 11 向けの統合テスト（マイグレーション、S3 サブリソース、バケットポリシー、セットアップ / セッション / pair token）が走ります。未設定ならスキップされます。指定ユーザーには `CREATE` / `DROP DATABASE` 権限が必要で、テストごとに使い捨て DB（`mirymesh_test_*`）を作成し、終了時に削除します。CI の `mysql-integration` ジョブも同じ手順で実行します。
+
+    docker run -d --name mirymesh-mysql-test -e MYSQL_ROOT_PASSWORD=mirytest -p 33306:3306 mysql:8.4
+    MIRYMESH_TEST_MYSQL_DSN='root:mirytest@tcp(127.0.0.1:33306)/' go test ./internal/... -count=1
+    docker rm -f mirymesh-mysql-test
+
+MariaDB で試す場合は、イメージを `mariadb:11` に、環境変数を `MARIADB_ROOT_PASSWORD` に替えてください。
 
 ## Documentation
 

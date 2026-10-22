@@ -12,11 +12,13 @@ import (
 
 // P2 subresources (?acl, ?tagging, ?cors, ...).
 //
-// MiryMesh has no storage for these configurations yet, so the honest answers are:
-//   - reads report the real state (unversioned, private ACL, no tags/CORS/lifecycle),
-//   - deletes of configuration that cannot exist are idempotent successes,
-//   - writes that we cannot persist stay 501 NotImplemented instead of silently
-//     succeeding (a silently accepted public-read ACL would be a security trap).
+// ?acl, ?tagging, ?cors and ?lifecycle are persisted through SubresourceStore
+// (table s3_subresources, in-memory when no DB is attached); their handlers
+// live in p2_config.go and CORS enforcement in p2_cors.go. Everything MiryMesh
+// cannot honour for real stays an explicit 501 NotImplemented instead of being
+// silently accepted:
+//   - ?versioning reports "unversioned" and refuses to enable (no version history),
+//   - analytics/inventory/metrics/retention/legal-hold/select.
 
 const p2XMLNS = "http://s3.amazonaws.com/doc/2006-03-01/"
 
@@ -85,7 +87,7 @@ func (rt *Router) handleP2Subresource(w http.ResponseWriter, r *http.Request) bo
 	case sub == "tagging":
 		rt.handleTagging(w, r, bucket, key)
 	case (sub == "cors" || sub == "lifecycle") && !objectLevel:
-		rt.handleAbsentBucketConfig(w, r, bucket, sub)
+		rt.handleBucketConfig(w, r, bucket, sub)
 	default:
 		writeError(w, r, errNotImplemented)
 	}
@@ -106,61 +108,7 @@ func (rt *Router) handleVersioning(w http.ResponseWriter, r *http.Request, bucke
 	}
 }
 
-func (rt *Router) handleACL(w http.ResponseWriter, r *http.Request, bucket, key string) {
-	if !rt.requireTarget(w, r, bucket, key) {
-		return
-	}
-	switch r.Method {
-	case http.MethodGet:
-		writeP2XML(w, http.StatusOK, aclPrivateXML)
-	case http.MethodPut:
-		// Only the canned "private" ACL is representable. Anything else would be
-		// silently ignored, so refuse it and point at bucket policies instead.
-		if r.Header.Get("X-Amz-Acl") == "private" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		writeError(w, r, p2NotImplemented("Only the private canned ACL is supported; use a bucket policy to grant access"))
-	default:
-		writeError(w, r, errMethodNotAllowedP2)
-	}
-}
-
-func (rt *Router) handleTagging(w http.ResponseWriter, r *http.Request, bucket, key string) {
-	if !rt.requireTarget(w, r, bucket, key) {
-		return
-	}
-	switch r.Method {
-	case http.MethodGet:
-		if key == "" {
-			writeError(w, r, errNoSuchTagSet)
-			return
-		}
-		writeP2XML(w, http.StatusOK, emptyTaggingXML)
-	case http.MethodDelete:
-		w.WriteHeader(http.StatusNoContent)
-	case http.MethodPut:
-		writeError(w, r, p2NotImplemented("Tagging is not supported"))
-	default:
-		writeError(w, r, errMethodNotAllowedP2)
-	}
-}
-
-func (rt *Router) handleAbsentBucketConfig(w http.ResponseWriter, r *http.Request, bucket, sub string) {
-	if !rt.requireBucket(w, r, bucket) {
-		return
-	}
-	switch r.Method {
-	case http.MethodGet:
-		writeError(w, r, absentBucketConfig[sub])
-	case http.MethodDelete:
-		w.WriteHeader(http.StatusNoContent)
-	case http.MethodPut:
-		writeError(w, r, p2NotImplemented("Setting the "+sub+" configuration is not supported"))
-	default:
-		writeError(w, r, errMethodNotAllowedP2)
-	}
-}
+// handleACL, handleTagging and handleBucketConfig (cors/lifecycle) are in p2_config.go.
 
 // requireBucket writes NoSuchBucket and returns false when the bucket is missing.
 func (rt *Router) requireBucket(w http.ResponseWriter, r *http.Request, bucket string) bool {

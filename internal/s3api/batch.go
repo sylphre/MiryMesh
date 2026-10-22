@@ -83,6 +83,10 @@ func (rt *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 				continue
 			}
 		}
+		if perr := rt.subStore().PurgeObjectSubresources(bucket, obj.Key); perr != nil {
+			resp.Errors = append(resp.Errors, errorXML{Key: obj.Key, Code: "InternalError", Message: "We encountered an internal error. Please try again."})
+			continue
+		}
 		if !req.Quiet {
 			resp.Deleted = append(resp.Deleted, deletedXML{Key: obj.Key})
 		}

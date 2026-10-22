@@ -83,6 +83,8 @@ type Storage struct {
 	uploads map[string]*MultipartUploadState
 	// bucket creation times recorded by this process
 	created map[string]time.Time
+	// P2 subresource documents (acl/tagging/cors/lifecycle) when no DB is attached
+	subres map[subKey]string
 }
 
 // MultipartUploadState holds in-progress multipart state (M6).
