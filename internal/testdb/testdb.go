@@ -34,7 +34,7 @@ func MySQL(t testing.TB) *sql.DB {
 		t.Fatalf("%s: %v", MySQLEnv, err)
 	}
 	buf := make([]byte, 6)
-	if _, err := rand.Read(buf); err != nil {
+	if _, err = rand.Read(buf); err != nil {
 		t.Fatalf("random name: %v", err)
 	}
 	name := "mirymesh_test_" + hex.EncodeToString(buf) // hex only: safe to quote into DDL
@@ -49,7 +49,7 @@ func MySQL(t testing.TB) *sql.DB {
 		_, _ = serverDB.Exec("DROP DATABASE IF EXISTS `" + name + "`")
 		_ = serverDB.Close()
 	})
-	if _, err := serverDB.Exec("CREATE DATABASE `" + name + "` CHARACTER SET utf8mb4"); err != nil {
+	if _, err = serverDB.Exec("CREATE DATABASE `" + name + "` CHARACTER SET utf8mb4"); err != nil {
 		t.Fatalf("create database: %v", err)
 	}
 

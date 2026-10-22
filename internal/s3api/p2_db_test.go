@@ -25,7 +25,7 @@ func newP2DBRouter(t *testing.T, dbPath, root string) (*Router, *sql.DB) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	db.SetMaxOpenConns(1)
-	if err := metadata.Migrate(db, "sqlite"); err != nil {
+	if err = metadata.Migrate(db, "sqlite"); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	st, err := NewStorageWithDB(root, db, "sqlite")

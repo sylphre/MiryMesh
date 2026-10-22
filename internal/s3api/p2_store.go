@@ -20,7 +20,7 @@ const (
 
 // SubresourceStore persists S3 P2 subresource documents. object_key == "" is
 // the bucket-level document. It is optional: stores that do not implement it
-// (e.g. the gateway placeholder) keep the pre-persistence behaviour.
+// (e.g. the gateway placeholder) keep the pre-persistence behavior.
 type SubresourceStore interface {
 	GetSubresource(bucket, key, kind string) (string, bool, error)
 	PutSubresource(bucket, key, kind, body string) error

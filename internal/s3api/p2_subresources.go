@@ -15,7 +15,7 @@ import (
 // ?acl, ?tagging, ?cors and ?lifecycle are persisted through SubresourceStore
 // (table s3_subresources, in-memory when no DB is attached); their handlers
 // live in p2_config.go and CORS enforcement in p2_cors.go. Everything MiryMesh
-// cannot honour for real stays an explicit 501 NotImplemented instead of being
+// cannot honor for real stays an explicit 501 NotImplemented instead of being
 // silently accepted:
 //   - ?versioning reports "unversioned" and refuses to enable (no version history),
 //   - analytics/inventory/metrics/retention/legal-hold/select.

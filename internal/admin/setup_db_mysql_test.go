@@ -131,13 +131,13 @@ func TestSetupStoreDBMySQLSessionsAndPairTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePairToken: %v", err)
 	}
-	if err := s.ConsumePairToken(tok); err != nil {
+	if err = s.ConsumePairToken(tok); err != nil {
 		t.Fatalf("ConsumePairToken: %v", err)
 	}
-	if err := s.ConsumePairToken(tok); err == nil || err.Error() != "pair token already used" {
+	if err = s.ConsumePairToken(tok); err == nil || err.Error() != "pair token already used" {
 		t.Errorf("second consume: err=%v want 'pair token already used'", err)
 	}
-	if err := s.ConsumePairToken("does-not-exist"); err == nil || err.Error() != "invalid pair token" {
+	if err = s.ConsumePairToken("does-not-exist"); err == nil || err.Error() != "invalid pair token" {
 		t.Errorf("unknown token: err=%v want 'invalid pair token'", err)
 	}
 
@@ -146,7 +146,7 @@ func TestSetupStoreDBMySQLSessionsAndPairTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePairToken expired: %v", err)
 	}
-	if err := s.ConsumePairToken(old); err == nil || err.Error() != "pair token expired" {
+	if err = s.ConsumePairToken(old); err == nil || err.Error() != "pair token expired" {
 		t.Errorf("expired token: err=%v want 'pair token expired'", err)
 	}
 }
