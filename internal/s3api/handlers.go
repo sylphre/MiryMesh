@@ -255,6 +255,10 @@ func (rt *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		writeError(w, r, errNoSuchBucket)
 		return
 	}
+	// Overwriting would destroy a protected object (no versioning).
+	if rt.rejectLocked(w, r, bucket, key) {
+		return
+	}
 	// Placement validation (M3+): check policy feasibility. Insufficient maps to 507.
 	var targets []struct{ NodeID, Path string }
 	if rt.placing != nil {
@@ -441,6 +445,10 @@ func (rt *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 	// S3 DeleteObject is idempotent: 204 even if bucket/key missing? Spec says 204; but we return 404 for NoSuchBucket to be helpful.
 	if !rt.store.BucketExists(bucket) {
 		writeError(w, r, errNoSuchBucket)
+		return
+	}
+	// Legal hold / unexpired retention protects the object from deletion.
+	if rt.rejectLocked(w, r, bucket, key) {
 		return
 	}
 	_ = rt.store.DeleteObject(bucket, key)

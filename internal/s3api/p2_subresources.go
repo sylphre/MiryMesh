@@ -18,7 +18,12 @@ import (
 // cannot honor for real stays an explicit 501 NotImplemented instead of being
 // silently accepted:
 //   - ?versioning reports "unversioned" and refuses to enable (no version history),
-//   - analytics/inventory/metrics/retention/legal-hold/select.
+//   - select.
+//
+// ?analytics, ?inventory and ?metrics (bucket level, addressed by ?id=) are
+// persisted the same way; their handlers live in p2_idconfig.go. Object level
+// ?retention and ?legal-hold live in p2_objectlock.go and also guard delete
+// and overwrite paths.
 
 const p2XMLNS = "http://s3.amazonaws.com/doc/2006-03-01/"
 
@@ -88,6 +93,10 @@ func (rt *Router) handleP2Subresource(w http.ResponseWriter, r *http.Request) bo
 		rt.handleTagging(w, r, bucket, key)
 	case (sub == "cors" || sub == "lifecycle") && !objectLevel:
 		rt.handleBucketConfig(w, r, bucket, sub)
+	case (sub == "analytics" || sub == "inventory" || sub == "metrics") && !objectLevel:
+		rt.handleIDConfig(w, r, bucket, sub)
+	case (sub == "retention" || sub == "legal-hold") && objectLevel:
+		rt.handleObjectLock(w, r, bucket, key, sub)
 	default:
 		writeError(w, r, errNotImplemented)
 	}

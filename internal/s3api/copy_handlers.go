@@ -25,6 +25,10 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 		writeError(w, r, errNoSuchBucket)
 		return
 	}
+	// The copy overwrites the destination: a protected object must stay intact.
+	if rt.rejectLocked(w, r, destBucket, destKey) {
+		return
+	}
 	srcMeta, rc, err2 := rt.store.GetObject(srcBucket, srcKey)
 	if err2 != nil {
 		if apiErr, ok := err2.(APIError); ok {

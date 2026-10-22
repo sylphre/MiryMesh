@@ -45,7 +45,7 @@ Master: Gin v1.12 で S3 `:9000` / Admin `:9001` / DataNode `:9002`。DB は `po
 
 ## S3 互換
 
-P0 19 ops（`ListBuckets〜ListMultipartUploads`）は全て実装、P1 はほぼ完了、P2 のうち `?acl`（canned / grant ヘッダ / ACP ボディ）、`?tagging`、`?cors`、`?lifecycle` は DB の `s3_subresources` テーブル（DB 未接続時はメモリ）に永続化し、入力検証、往復取得、保存済み CORS による preflight 応答と `Access-Control-*` ヘッダ付与に対応します。`x-amz-tagging` は PutObject / CopyObject（`x-amz-tagging-directive`）に追従し、オブジェクトの上書き・削除・マルチパート完了・バケット削除で保存済みの設定を掃除します。`GET ?versioning` は未バージョニングを返し、有効化は `501`。`?versioning` の有効化と `analytics/inventory/metrics/retention/legal-hold/select` は `501 NotImplemented`。配置不可は `507 InsufficientStorage`。`PUT/GET/DELETE ?policy` は `20KiB` / `MalformedPolicy` / `NoSuchBucketPolicy` で Misskey/Nextcloud の P0 は in-process と e2e で PASS。詳細は Compatibility を参照。
+P0 19 ops（`ListBuckets〜ListMultipartUploads`）は全て実装、P1 はほぼ完了、P2 のうち `?acl`（canned / grant ヘッダ / ACP ボディ）、`?tagging`、`?cors`、`?lifecycle` は DB の `s3_subresources` テーブル（DB 未接続時はメモリ）に永続化し、入力検証、往復取得、保存済み CORS による preflight 応答と `Access-Control-*` ヘッダ付与に対応します。`x-amz-tagging` は PutObject / CopyObject（`x-amz-tagging-directive`）に追従し、オブジェクトの上書き・削除・マルチパート完了・バケット削除で保存済みの設定を掃除します。`GET ?versioning` は未バージョニングを返し、有効化は `501`。`?analytics` / `?inventory` / `?metrics` は `?id=` 指定の設定として保存・取得・一覧・削除でき、オブジェクト単位の `?retention` / `?legal-hold` は削除・上書き（PutObject / CopyObject / CompleteMultipartUpload / DeleteObjects）をロックで保護します。`?versioning` の有効化と `select` は `501 NotImplemented`。配置不可は `507 InsufficientStorage`。`PUT/GET/DELETE ?policy` は `20KiB` / `MalformedPolicy` / `NoSuchBucketPolicy` で Misskey/Nextcloud の P0 は in-process と e2e で PASS。詳細は Compatibility を参照。
 
 ## Configuration
 

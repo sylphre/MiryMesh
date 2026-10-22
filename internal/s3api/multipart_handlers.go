@@ -170,6 +170,10 @@ func (rt *Router) handleCompleteMultipart(w http.ResponseWriter, r *http.Request
 	for _, p := range req.Parts {
 		parts = append(parts, CompletePart{PartNumber: p.PartNumber, ETag: p.ETag})
 	}
+	// Completing replaces the object at key: a protected object must stay intact.
+	if rt.rejectLocked(w, r, bucket, key) {
+		return
+	}
 	meta, err2 := rt.store.CompleteMultipartUpload(uploadID, parts)
 	if err2 != nil {
 		if apiErr, ok := err2.(APIError); ok {

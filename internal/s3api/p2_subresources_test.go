@@ -92,7 +92,8 @@ func TestP2Subresources(t *testing.T) {
 		{"lifecycle get", http.MethodGet, "/bkt?lifecycle", nil, "", http.StatusNotFound, "<Code>NoSuchLifecycleConfiguration</Code>"},
 		{"lifecycle delete", http.MethodDelete, "/bkt?lifecycle", nil, "", http.StatusNoContent, ""},
 		{"lifecycle put empty body", http.MethodPut, "/bkt?lifecycle", nil, "", http.StatusBadRequest, "<Code>MalformedXML</Code>"},
-		{"analytics stays 501", http.MethodGet, "/bkt?analytics", nil, "", http.StatusNotImplemented, "<Code>NotImplemented</Code>"},
+		{"bucket retention stays 501", http.MethodGet, "/bkt?retention", nil, "", http.StatusNotImplemented, "<Code>NotImplemented</Code>"},
+		{"bucket legal-hold stays 501", http.MethodGet, "/bkt?legal-hold", nil, "", http.StatusNotImplemented, "<Code>NotImplemented</Code>"},
 		{"select stays 501", http.MethodPost, "/bkt/obj.txt?select&select-type=2", nil, "", http.StatusNotImplemented, "<Code>NotImplemented</Code>"},
 		{"root subresource", http.MethodGet, "/?acl", nil, "", http.StatusNotImplemented, "<Code>NotImplemented</Code>"},
 	}

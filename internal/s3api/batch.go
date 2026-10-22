@@ -74,6 +74,10 @@ func (rt *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 			resp.Errors = append(resp.Errors, errorXML{Key: obj.Key, Code: apiErr.Code, Message: apiErr.Message})
 			continue
 		}
+		if lockErr, locked := rt.checkObjectLock(r, bucket, obj.Key); locked {
+			resp.Errors = append(resp.Errors, errorXML{Key: obj.Key, Code: lockErr.Code, Message: lockErr.Message})
+			continue
+		}
 		// versionId ignored (unversioned). Deleting a missing key is a success,
 		// as in S3; any other failure is reported per key.
 		if derr := rt.store.DeleteObject(bucket, obj.Key); derr != nil {
