@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,8 +37,21 @@ func (rt *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 	res.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
 	res.Owner.ID = "mirymesh"
 	res.Owner.DisplayName = "MiryMesh"
+	// S3 returns buckets ordered by name with their real creation time.
+	sort.Strings(buckets)
+	type creationDater interface {
+		BucketCreationDate(bucket string) (time.Time, bool)
+	}
+	cd, _ := rt.store.(creationDater)
+	now := time.Now().UTC()
 	for _, b := range buckets {
-		res.Buckets.Bucket = append(res.Buckets.Bucket, bucketXML{Name: b, CreationDate: time.Now().UTC().Format(time.RFC3339)})
+		created := now
+		if cd != nil {
+			if t, ok := cd.BucketCreationDate(b); ok {
+				created = t
+			}
+		}
+		res.Buckets.Bucket = append(res.Buckets.Bucket, bucketXML{Name: b, CreationDate: created.UTC().Format("2006-01-02T15:04:05.000Z")})
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(http.StatusOK)
@@ -111,24 +125,51 @@ func (rt *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	maxKeysStr := q.Get("max-keys")
 	maxKeys := 1000
 	if maxKeysStr != "" {
-		if v, err := strconv.Atoi(maxKeysStr); err == nil {
-			maxKeys = v
+		v, err := strconv.Atoi(maxKeysStr)
+		if err != nil || v < 0 {
+			writeError(w, r, errInvalidArgument)
+			return
 		}
+		if v > 1000 {
+			v = 1000
+		}
+		maxKeys = v
 	}
 	encodingType := q.Get("encoding-type")
+	if encodingType != "" && encodingType != "url" {
+		writeError(w, r, errInvalidArgument)
+		return
+	}
+	startAfter := q.Get("start-after")
+	enc := func(s string) string {
+		if encodingType == "url" {
+			return url.QueryEscape(s)
+		}
+		return s
+	}
 	// Support ?list-type=2 and v1 ?marker shim: if list-type missing but marker present, treat marker as continuation-token.
 	if !q.Has("list-type") && q.Has("marker") {
 		continuationToken = q.Get("marker")
 	}
 	// Also support virtual ?list-type not set but prefix etc implies ListObjectsV2 shim.
-	res, err := rt.store.ListObjectsV2(bucket, prefix, delimiter, continuationToken, maxKeys)
-	if err != nil {
-		if apiErr, ok := err.(APIError); ok {
-			writeError(w, r, apiErr)
+	// start-after only applies when no continuation token is given.
+	listFrom := continuationToken
+	if listFrom == "" {
+		listFrom = startAfter
+	}
+	// max-keys=0 returns an empty, non-truncated result (S3 behavior).
+	var res ListObjectsV2Result
+	if maxKeys > 0 {
+		var lerr error
+		res, lerr = rt.store.ListObjectsV2(bucket, prefix, delimiter, listFrom, maxKeys)
+		if lerr != nil {
+			if apiErr, ok := lerr.(APIError); ok {
+				writeError(w, r, apiErr)
+				return
+			}
+			writeXMLError(w, r, http.StatusInternalServerError, "InternalError", lerr.Error())
 			return
 		}
-		writeXMLError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
-		return
 	}
 	type contentsXML struct {
 		Key          string `xml:"Key"`
@@ -147,6 +188,7 @@ func (rt *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		IsTruncated           bool          `xml:"IsTruncated"`
 		NextContinuationToken string        `xml:"NextContinuationToken,omitempty"`
 		ContinuationToken     string        `xml:"ContinuationToken,omitempty"`
+		StartAfter            string        `xml:"StartAfter,omitempty"`
 		KeyCount              int           `xml:"KeyCount"`
 		EncodingType          string        `xml:"EncodingType,omitempty"`
 		Contents              []contentsXML `xml:"Contents"`
@@ -157,14 +199,17 @@ func (rt *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	lr := listResult{
 		Xmlns:       "http://s3.amazonaws.com/doc/2006-03-01/",
 		Name:        bucket,
-		Prefix:      prefix,
-		Delimiter:   delimiter,
+		Prefix:      enc(prefix),
+		Delimiter:   enc(delimiter),
 		MaxKeys:     maxKeys,
 		IsTruncated: res.IsTruncated,
 		KeyCount:    res.KeyCount,
 	}
 	if encodingType != "" {
 		lr.EncodingType = encodingType
+	}
+	if startAfter != "" {
+		lr.StartAfter = enc(startAfter)
 	}
 	if continuationToken != "" {
 		lr.ContinuationToken = continuationToken
@@ -281,12 +326,29 @@ func (rt *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		return
 	}
 	defer rc.Close()
-	// Handle Range? M1 supports simple bytes=START-END or bytes=START-
+	// Conditional headers are evaluated before Range (RFC 7232 section 6).
+	switch evalReadPreconditions(r.Header, meta) {
+	case precondFailed:
+		writeError(w, r, errPreconditionFailed)
+		return
+	case precondNotModified:
+		w.Header().Set("ETag", `"`+meta.ETag+`"`)
+		w.Header().Set("Last-Modified", meta.LastMod.UTC().Format(http.TimeFormat))
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	status := http.StatusOK
 	var size = meta.Size
+	served := size
 	var bodyReader io.Reader = rc
 	if rg := r.Header.Get("Range"); rg != "" {
-		if start, end, ok := parseRange(rg, size); ok {
+		start, end, rres := parseByteRange(rg, size)
+		if rres == rangeUnsatisfiable {
+			w.Header().Set("Content-Range", "bytes */"+strconv.FormatInt(size, 10))
+			writeError(w, r, errInvalidRange)
+			return
+		}
+		if rres == rangeOK {
 			length := end - start + 1
 			if seeker, ok := rc.(interface {
 				io.Seeker
@@ -308,6 +370,7 @@ func (rt *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 			w.Header().Set("Content-Range", "bytes "+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10)+"/"+strconv.FormatInt(size, 10))
 			w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 			status = http.StatusPartialContent
+			served = length
 		}
 	}
 	if status == http.StatusOK {
@@ -319,36 +382,10 @@ func (rt *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	for k, v := range meta.Meta {
 		w.Header().Set("X-Amz-Meta-"+k, v)
 	}
-	// Handle If-None-Match / If-Match / If-Modified-Since minimally.
-	if inm := r.Header.Get("If-None-Match"); inm != "" {
-		if strings.Trim(inm, `"`) == meta.ETag || inm == "*" {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-	}
-	if ims := r.Header.Get("If-Modified-Since"); ims != "" {
-		if t, err := time.Parse(http.TimeFormat, ims); err == nil {
-			if !meta.LastMod.After(t) {
-				w.WriteHeader(http.StatusNotModified)
-				return
-			}
-		}
-	}
 	w.WriteHeader(status)
 	_, _ = io.Copy(w, bodyReader)
 	if mRecorder != nil {
-		if status == http.StatusPartialContent {
-			// Range: count actual bytes served
-			if rg := r.Header.Get("Range"); rg != "" {
-				if start, end, ok := parseRange(rg, size); ok {
-					mRecorder(true, end-start+1)
-				} else {
-					mRecorder(true, size)
-				}
-			}
-		} else {
-			mRecorder(true, size)
-		}
+		mRecorder(true, served)
 	}
 }
 
@@ -373,11 +410,13 @@ func (rt *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 	for k, v := range meta.Meta {
 		w.Header().Set("X-Amz-Meta-"+k, v)
 	}
-	if inm := r.Header.Get("If-None-Match"); inm != "" {
-		if strings.Trim(inm, `"`) == meta.ETag || inm == "*" {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
+	switch evalReadPreconditions(r.Header, meta) {
+	case precondFailed:
+		w.WriteHeader(http.StatusPreconditionFailed)
+		return
+	case precondNotModified:
+		w.WriteHeader(http.StatusNotModified)
+		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -390,48 +429,6 @@ func (rt *Router) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 	}
 	_ = rt.store.DeleteObject(bucket, key)
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func parseRange(spec string, size int64) (int64, int64, bool) {
-	// bytes=START-END, bytes=START-, bytes=-SUFFIX
-	if !strings.HasPrefix(spec, "bytes=") {
-		return 0, 0, false
-	}
-	rest := strings.TrimPrefix(spec, "bytes=")
-	// Only single range.
-	if strings.Contains(rest, ",") {
-		return 0, 0, false
-	}
-	parts := strings.SplitN(rest, "-", 2)
-	if len(parts) != 2 {
-		return 0, 0, false
-	}
-	if parts[0] == "" {
-		// suffix: -N
-		n, err := strconv.ParseInt(parts[1], 10, 64)
-		if err != nil || n <= 0 {
-			return 0, 0, false
-		}
-		if n > size {
-			n = size
-		}
-		return size - n, size - 1, true
-	}
-	start, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || start < 0 || start >= size {
-		return 0, 0, false
-	}
-	if parts[1] == "" {
-		return start, size - 1, true
-	}
-	end, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || end < start {
-		return 0, 0, false
-	}
-	if end >= size {
-		end = size - 1
-	}
-	return start, end, true
 }
 
 func isNoSpaceError(err error) bool {

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -80,6 +81,8 @@ type Storage struct {
 	meta map[string]map[string]ObjectMeta
 	// multipart in-progress uploads: uploadID -> upload (persisted to disk)
 	uploads map[string]*MultipartUploadState
+	// bucket creation times recorded by this process
+	created map[string]time.Time
 }
 
 // MultipartUploadState holds in-progress multipart state (M6).
@@ -189,19 +192,11 @@ func (s *Storage) IsOverQuota(additional int64) bool {
 
 func (s *Storage) bucketDir(bucket string) string { return filepath.Join(s.root, bucket) }
 func (s *Storage) objectPath(bucket, key string) string {
-	// key may contain "/"; treat as relative path. Clean and prevent traversal.
-	clean := filepath.Clean(key)
-	// filepath.Clean("a/../../b") -> "../../b" — reject if starts with ".."
-	if clean == "." {
-		clean = ""
-	}
-	// TODO(M2+): reject traversal with 400 InvalidRequest instead of silent
-	// rewrite. Current __dotdot__ replacement is M1 compatibility shim; see
-	// validate.go — keys containing ".." segments should be rejected with
-	// errInvalidRequest rather than mangled. Tracked from M1-review #4.
-	if strings.HasPrefix(clean, ".."+string(os.PathSeparator)) || clean == ".." {
-		clean = strings.ReplaceAll(clean, "..", "__dotdot__")
-	}
+	// The API edge rejects "." / ".." segments (validateObjectKey). As defense
+	// in depth for paths that bypass it (CopyObject source, DeleteObjects body),
+	// anchor the key at "/" before cleaning so ".." can never climb out of the
+	// bucket directory.
+	clean := path.Clean("/" + key)
 	return filepath.Join(s.bucketDir(bucket), filepath.FromSlash(clean))
 }
 
@@ -230,19 +225,36 @@ func (s *Storage) CreateBucket(bucket string) error {
 	}
 	s.buckets[bucket] = struct{}{}
 	s.meta[bucket] = make(map[string]ObjectMeta)
+	if s.created == nil {
+		s.created = make(map[string]time.Time)
+	}
+	s.created[bucket] = time.Now().UTC()
 	if s.db != nil {
-		owner := "admin"
-		// Best-effort: insert bucket row for policy persistence; ignore duplicate
-		if s.dbDriver == "postgres" || s.dbDriver == "postgresql" {
-			_, _ = s.db.Exec("INSERT INTO buckets(name, owner) VALUES($1, $2) ON CONFLICT (name) DO NOTHING", bucket, owner)
-		} else {
-			_, _ = s.db.Exec("INSERT IGNORE INTO buckets(name, owner) VALUES(?, ?)", bucket, owner)
-			if s.dbDriver == "sqlite" || s.dbDriver == "sqlite3" {
-				_, _ = s.db.Exec("INSERT OR IGNORE INTO buckets(name, owner) VALUES(?, ?)", bucket, owner)
-			}
+		if err := s.insertBucketRow(bucket, "admin"); err != nil {
+			delete(s.buckets, bucket)
+			delete(s.meta, bucket)
+			delete(s.created, bucket)
+			_ = os.Remove(s.bucketDir(bucket))
+			return err
 		}
 	}
 	return nil
+}
+
+// insertBucketRow records the bucket in the DB with a driver-specific
+// "ignore duplicate" statement (exactly one statement per driver).
+func (s *Storage) insertBucketRow(bucket, owner string) error {
+	var q string
+	switch s.dbDriver {
+	case "postgres", "postgresql":
+		q = "INSERT INTO buckets(name, owner) VALUES($1, $2) ON CONFLICT (name) DO NOTHING"
+	case "sqlite", "sqlite3":
+		q = "INSERT OR IGNORE INTO buckets(name, owner) VALUES(?, ?)"
+	default:
+		q = "INSERT IGNORE INTO buckets(name, owner) VALUES(?, ?)"
+	}
+	_, err := s.db.Exec(q, bucket, owner)
+	return err
 }
 
 // BucketExists reports existence.
@@ -569,192 +581,6 @@ type ListObjectsV2Result struct {
 	IsTruncated           bool
 	NextContinuationToken string
 	KeyCount              int
-}
-
-// ListObjectsV2 implements S3 ListObjectsV2 semantics for M1 (in-memory).
-func (s *Storage) ListObjectsV2(bucket, prefix, delimiter, continuationToken string, maxKeys int) (ListObjectsV2Result, error) {
-	if err := s.ensureBucketExists(bucket); err != nil {
-		return ListObjectsV2Result{}, err
-	}
-	if maxKeys <= 0 {
-		maxKeys = 1000
-	}
-	if maxKeys > 1000 {
-		maxKeys = 1000
-	}
-	s.mu.RLock()
-	keys := make([]string, 0, len(s.meta[bucket]))
-	for k := range s.meta[bucket] {
-		keys = append(keys, k)
-	}
-	// Fallback: also scan filesystem for keys not yet in meta (e.g. after crash).
-	// For M1, we add filesystem walk if meta is empty but bucket dir has files.
-	s.mu.RUnlock()
-	// Sort keys lexicographically per S3 spec.
-	// Use simple bubble-free sort via standard library done inline to avoid import.
-	sortStrings(keys)
-	// Filter by prefix.
-	filtered := keys[:0]
-	for _, k := range keys {
-		if prefix != "" && !strings.HasPrefix(k, prefix) {
-			continue
-		}
-		filtered = append(filtered, k)
-	}
-	keys = filtered
-	// Find start index after continuationToken.
-	start := 0
-	if continuationToken != "" {
-		for i, k := range keys {
-			if k == continuationToken {
-				start = i + 1
-				break
-			}
-			if k > continuationToken {
-				start = i
-				break
-			}
-		}
-	}
-	// Handle delimiter: group keys with common prefixes.
-	var prefixes []string
-	seenPrefix := make(map[string]bool)
-	var objects []ObjectMeta
-	var collected []string // keys that contribute to pagination (objects + prefixes as one entry? S3 counts objects for IsTruncated; prefixes are extra)
-	// S3: CommonPrefixes are distinct prefixes up to delimiter; objects whose key contains delimiter after prefix are rolled up.
-	for i := start; i < len(keys); i++ {
-		k := keys[i]
-		if delimiter != "" {
-			rest := k
-			if prefix != "" {
-				rest = strings.TrimPrefix(k, prefix)
-			}
-			if idx := strings.Index(rest, delimiter); idx >= 0 {
-				cp := k[:len(prefix)+idx+len(delimiter)]
-				if !seenPrefix[cp] {
-					seenPrefix[cp] = true
-					prefixes = append(prefixes, cp)
-					collected = append(collected, cp)
-					if len(collected) >= maxKeys {
-						break
-					}
-				}
-				continue
-			}
-		}
-		// Regular object.
-		s.mu.RLock()
-		m := s.meta[bucket][k]
-		s.mu.RUnlock()
-		objects = append(objects, m)
-		collected = append(collected, k)
-		if len(collected) >= maxKeys {
-			break
-		}
-	}
-	sortStrings(prefixes)
-	// Determine truncation: if we consumed less than remaining keys/prefixes.
-	totalCollected := len(objects) + len(prefixes)
-	// Estimate remaining: walk remaining keys to see if more groups/objects exist beyond collected.
-	remaining := 0
-	if len(collected) >= maxKeys {
-		// Need to know if there is more beyond current window.
-		// Re-scan from i after break point.
-		// Simplistic: if start+len(keys) > start+some, mark truncated.
-		// Instead do exact by continuing loop.
-		// We already broke, so if there are more distinct entries beyond, truncated = true.
-		// Check by continuing virtual scan.
-		seen2 := make(map[string]bool)
-		for k := range seenPrefix {
-			seen2[k] = true
-		}
-		for i := start; i < len(keys); i++ {
-			k := keys[i]
-			// Skip if already counted.
-			already := false
-			for _, c := range collected {
-				if c == k {
-					already = true
-					break
-				}
-				// Also if k belongs to a collected prefix.
-				if seenPrefix[c] && strings.HasPrefix(k, c) {
-					already = true
-					break
-				}
-			}
-			_ = already
-		}
-		// Simpler: if we broke due to maxKeys and there are more keys beyond, truncated = true.
-		// Check by counting distinct entries beyond collected window.
-		countDistinct := 0
-		seenTmp := make(map[string]bool)
-		for _, k := range keys[start:] {
-			if delimiter != "" {
-				rest := k
-				if prefix != "" {
-					rest = strings.TrimPrefix(k, prefix)
-				}
-				if idx := strings.Index(rest, delimiter); idx >= 0 {
-					cp := k[:len(prefix)+idx+len(delimiter)]
-					if !seenTmp[cp] {
-						seenTmp[cp] = true
-						countDistinct++
-					}
-					continue
-				}
-			}
-			countDistinct++
-		}
-		if countDistinct > totalCollected {
-			remaining = countDistinct - totalCollected
-		}
-	}
-	isTruncated := remaining > 0
-	nextToken := ""
-	if isTruncated && len(collected) > 0 {
-		nextToken = collected[len(collected)-1]
-	}
-	return ListObjectsV2Result{
-		Objects:               objects,
-		CommonPrefixes:        prefixes,
-		IsTruncated:           isTruncated,
-		NextContinuationToken: nextToken,
-		KeyCount:              len(objects),
-	}, nil
-}
-
-func sortStrings(a []string) {
-	// Insertion sort is fine for small n; for large n use stdlib sort via manual.
-	// Use Go's sort package without importing at top to avoid cycle; we import via fully qualified if needed.
-	// Instead use an inline quick sort using stdlib.
-	if len(a) < 2 {
-		return
-	}
-	// Use Go's sort.StringSlice via type assertion trick: just call sort via helper.
-	quickSort(a, 0, len(a)-1)
-}
-
-func quickSort(a []string, lo, hi int) {
-	if lo >= hi {
-		return
-	}
-	p := partition(a, lo, hi)
-	quickSort(a, lo, p-1)
-	quickSort(a, p+1, hi)
-}
-
-func partition(a []string, lo, hi int) int {
-	pivot := a[hi]
-	i := lo
-	for j := lo; j < hi; j++ {
-		if a[j] <= pivot {
-			a[i], a[j] = a[j], a[i]
-			i++
-		}
-	}
-	a[i], a[hi] = a[hi], a[i]
-	return i
 }
 
 func cloneMeta(m map[string]string) map[string]string {

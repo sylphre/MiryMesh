@@ -83,6 +83,10 @@ func (h *Handler) handleBucketSub(w http.ResponseWriter, r *http.Request) {
 		h.handleBucketObjects(w, r, bucket)
 		return
 	}
+	if parts[1] == "object" {
+		h.handleBucketObject(w, r, bucket)
+		return
+	}
 	http.NotFound(w, r)
 }
 

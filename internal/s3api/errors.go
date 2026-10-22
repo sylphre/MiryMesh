@@ -30,6 +30,10 @@ var (
 	errAccessDenied       = APIError{Code: "AccessDenied", Message: "Access Denied", Status: http.StatusForbidden}
 	errInvalidBucketName  = APIError{Code: "InvalidBucketName", Message: "The specified bucket is not valid", Status: http.StatusBadRequest}
 	errInvalidRequest     = APIError{Code: "InvalidRequest", Message: "Invalid request", Status: http.StatusBadRequest}
+	errInvalidArgument    = APIError{Code: "InvalidArgument", Message: "Invalid argument", Status: http.StatusBadRequest}
+	errKeyTooLong         = APIError{Code: "KeyTooLongError", Message: "Your key is too long", Status: http.StatusBadRequest}
+	errPreconditionFailed = APIError{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", Status: http.StatusPreconditionFailed}
+	errInvalidRange       = APIError{Code: "InvalidRange", Message: "The requested range is not satisfiable", Status: http.StatusRequestedRangeNotSatisfiable}
 	errSignatureMismatch  = APIError{Code: "SignatureDoesNotMatch", Message: "The request signature we calculated does not match the signature you provided", Status: http.StatusForbidden}
 	errNotImplemented     = APIError{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", Status: http.StatusNotImplemented}
 	errInsufficient       = APIError{Code: "InsufficientStorage", Message: "Insufficient storage. The placement engine could not place the object.", Status: 507}

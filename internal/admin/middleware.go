@@ -4,6 +4,8 @@
 package admin
 
 import (
+	"crypto/subtle"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -36,36 +38,27 @@ func (h *Handler) checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	if token == "" {
 		token = strings.TrimSpace(r.URL.Query().Get("token"))
 	}
-	// If no token required (empty adminToken and no DB sessions), allow.
-	if token == "" {
-		if h.adminToken == "" {
-			// Check if setupStore is Mem or nil with no sessions -> allow
-			if _, ok := h.setupStore.(*MemSetupStore); ok {
-				return true
-			}
-		}
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return false
-	}
-	// Prefer session validation for any store that implements it.
-	if sdb, ok := h.setupStore.(*SetupStoreDB); ok {
-		if sdb.ValidateSession(token) {
-			return true
-		}
-	} else if ms, ok := h.setupStore.(*MemSetupStore); ok {
-		if ms.ValidateSession(token) {
-			return true
-		}
-	}
-	if h.adminToken != "" && token == h.adminToken {
-		return true
-	}
-	// If adminToken empty and no DB, allow (test mode)
-	if h.adminToken == "" {
+	if token != "" && h.validToken(token) {
 		return true
 	}
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 	return false
+}
+
+// validToken reports whether token is a live session or the configured admin token.
+// An empty adminToken never matches anything: a missing secret must not mean "open".
+func (h *Handler) validToken(token string) bool {
+	switch s := h.setupStore.(type) {
+	case *SetupStoreDB:
+		if s.ValidateSession(token) {
+			return true
+		}
+	case *MemSetupStore:
+		if s.ValidateSession(token) {
+			return true
+		}
+	}
+	return h.adminToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.adminToken)) == 1
 }
 
 // Gin-compatible middleware (used after migration).
@@ -89,16 +82,12 @@ func allowLogin(ip string) bool {
 	return v.(*rate.Limiter).Allow()
 }
 
+// clientIP returns the peer address. X-Forwarded-For is deliberately ignored:
+// it is client-controlled and would let an attacker dodge the login rate limit.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if idx := strings.Index(xff, ","); idx >= 0 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
-	}
-	host := r.RemoteAddr
-	if idx := strings.LastIndex(host, ":"); idx >= 0 {
-		host = host[:idx]
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
 	}
 	return host
 }

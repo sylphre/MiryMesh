@@ -138,6 +138,10 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Object-level operations: /{bucket}/{key}
 	if !isBucketOp || key != "" {
+		if kerr, ok := validateObjectKey(key); !ok {
+			writeError(w, r, kerr)
+			return
+		}
 		// Multipart + UploadPartCopy dispatch: PUT with uploadId+partNumber
 		if r.Method == http.MethodPut && q.Has("uploadId") && q.Has("partNumber") {
 			if r.Header.Get("X-Amz-Copy-Source") != "" || r.Header.Get("x-amz-copy-source") != "" {

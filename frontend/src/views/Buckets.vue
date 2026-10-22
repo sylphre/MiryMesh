@@ -66,6 +66,7 @@ async function create() {
 }
 async function selectBucket(b) {
   selected.value = b
+  objectMsg.value = ''
   objects.value = []
   policyJSON.value = ''
   policyError.value = ''
@@ -110,6 +111,80 @@ async function deletePolicy() {
   if (res.ok) { policyJSON.value = ''; access.value = 'private'; policyError.value = '削除しました' }
   else policyError.value = await res.text()
 }
+const objectMsg = ref('')
+const uploading = ref(false)
+
+function adminToken() { return localStorage.getItem('mirymesh_admin_token') || '' }
+function objectURL(b, key) {
+  return `/api/admin/buckets/${encodeURIComponent(b)}/object?key=${encodeURIComponent(key)}`
+}
+function formatSize(n) {
+  if (!Number.isFinite(n)) return ''
+  if (n < 1024) return `${n} B`
+  const units = ['KiB', 'MiB', 'GiB', 'TiB']
+  let v = n / 1024
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(1)} ${units[i]}`
+}
+async function refreshObjects() {
+  if (!selected.value) return
+  try {
+    const r = await fetch(`/api/admin/buckets/${encodeURIComponent(selected.value)}/objects`, { headers: { 'X-Admin-Token': adminToken() } })
+    if (r.ok) { const j = await r.json(); objects.value = j.objects || [] }
+  } catch (e) { objectMsg.value = e.message }
+}
+async function uploadFiles(ev) {
+  const input = ev.target
+  const files = Array.from(input.files || [])
+  if (!files.length || !selected.value) return
+  const bucket = selected.value
+  uploading.value = true
+  objectMsg.value = ''
+  const failed = []
+  for (const f of files) {
+    try {
+      const res = await fetch(objectURL(bucket, f.name), {
+        method: 'PUT',
+        headers: { 'Content-Type': f.type || 'application/octet-stream', 'X-Admin-Token': adminToken() },
+        body: f
+      })
+      if (!res.ok) failed.push(`${f.name}: ${await res.text()}`)
+    } catch (e) { failed.push(`${f.name}: ${e.message}`) }
+  }
+  uploading.value = false
+  input.value = ''
+  objectMsg.value = failed.length
+    ? `失敗 ${failed.length} 件 — ${failed.join(' / ')}`
+    : `${files.length} 件をアップロードしました`
+  if (selected.value === bucket) await refreshObjects()
+}
+async function downloadObject(key) {
+  objectMsg.value = ''
+  try {
+    const res = await fetch(objectURL(selected.value, key), { headers: { 'X-Admin-Token': adminToken() } })
+    if (!res.ok) throw new Error(await res.text())
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = key.split('/').pop() || key
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) { objectMsg.value = `ダウンロード失敗: ${e.message}` }
+}
+async function deleteObject(key) {
+  if (!window.confirm(`「${key}」を削除しますか？`)) return
+  objectMsg.value = ''
+  try {
+    const res = await fetch(objectURL(selected.value, key), { method: 'DELETE', headers: { 'X-Admin-Token': adminToken() } })
+    if (!res.ok) throw new Error(await res.text())
+    objectMsg.value = `削除しました: ${key}`
+    await refreshObjects()
+  } catch (e) { objectMsg.value = `削除失敗: ${e.message}` }
+}
 onMounted(load)
 </script>
 <template>
@@ -128,7 +203,27 @@ onMounted(load)
       <div v-if="selected" class="card" style="flex:1.5;">
         <h3>{{ selected }}</h3>
         <p class="caption">Objects: {{ objects.length }}</p>
-        <ul v-if="objects.length" style="max-height:120px;overflow:auto;margin:8px 0;"><li v-for="o in objects" :key="o.Key">{{ o.Key }} ({{ o.Size }} bytes)</li></ul>
+        <div style="margin:8px 0;">
+          <label for="object-upload" class="caption" style="display:block;margin-bottom:4px;">Upload</label>
+          <input id="object-upload" type="file" multiple :disabled="uploading" @change="uploadFiles" />
+          <span v-if="uploading" class="caption" role="status"> アップロード中…</span>
+        </div>
+        <p v-if="objectMsg" class="caption" role="status" style="margin:8px 0;word-break:break-word;">{{ objectMsg }}</p>
+        <div v-if="objects.length" style="max-height:240px;overflow:auto;margin:8px 0;">
+          <table class="table">
+            <thead><tr><th>Key</th><th>Size</th><th>Actions</th></tr></thead>
+            <tbody>
+              <tr v-for="o in objects" :key="o.Key">
+                <td style="word-break:break-all;">{{ o.Key }}</td>
+                <td>{{ formatSize(o.Size) }}</td>
+                <td style="white-space:nowrap;">
+                  <button type="button" class="btn" :aria-label="`${o.Key} をダウンロード`" @click="downloadObject(o.Key)">Download</button>
+                  <button type="button" class="btn" :aria-label="`${o.Key} を削除`" @click="deleteObject(o.Key)">Delete</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <div v-else class="state--empty">No objects</div>
 
         <div style="margin-top:16px;">

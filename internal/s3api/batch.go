@@ -5,18 +5,27 @@ package s3api
 
 import (
 	"encoding/xml"
+	"errors"
 	"io"
 	"net/http"
 )
+
+// maxDeleteBodyBytes bounds the DeleteObjects request body: 1000 keys of up to
+// 1024 bytes each plus XML overhead.
+const maxDeleteBodyBytes = 4 << 20
 
 func (rt *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucket string) {
 	if !rt.store.BucketExists(bucket) {
 		writeError(w, r, errNoSuchBucket)
 		return
 	}
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxDeleteBodyBytes+1))
 	if err != nil {
 		writeXMLError(w, r, 400, "MalformedXML", err.Error())
+		return
+	}
+	if len(body) > maxDeleteBodyBytes {
+		writeXMLError(w, r, 400, "MalformedXML", "request body too large")
 		return
 	}
 	type objectXML struct {
@@ -61,8 +70,19 @@ func (rt *Router) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 			resp.Errors = append(resp.Errors, errorXML{Key: obj.Key, Code: "InvalidRequest", Message: "Key is empty"})
 			continue
 		}
-		// versionId ignored (unversioned)
-		_ = rt.store.DeleteObject(bucket, obj.Key)
+		if apiErr, ok := validateObjectKey(obj.Key); !ok {
+			resp.Errors = append(resp.Errors, errorXML{Key: obj.Key, Code: apiErr.Code, Message: apiErr.Message})
+			continue
+		}
+		// versionId ignored (unversioned). Deleting a missing key is a success,
+		// as in S3; any other failure is reported per key.
+		if derr := rt.store.DeleteObject(bucket, obj.Key); derr != nil {
+			var apiErr APIError
+			if !errors.As(derr, &apiErr) || apiErr.Code != "NoSuchKey" {
+				resp.Errors = append(resp.Errors, errorXML{Key: obj.Key, Code: "InternalError", Message: "We encountered an internal error. Please try again."})
+				continue
+			}
+		}
 		if !req.Quiet {
 			resp.Deleted = append(resp.Deleted, deletedXML{Key: obj.Key})
 		}

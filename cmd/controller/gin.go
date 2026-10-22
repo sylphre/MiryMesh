@@ -48,6 +48,9 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 	adminG.PUT("/buckets/:bucket/s3-policy", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.DELETE("/buckets/:bucket/s3-policy", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.GET("/buckets/:bucket/objects", ginWrapAuth(h, h.HandleBucketSub))
+	adminG.GET("/buckets/:bucket/object", ginWrapAuth(h, h.HandleBucketSub))
+	adminG.PUT("/buckets/:bucket/object", ginWrapAuth(h, h.HandleBucketSub))
+	adminG.DELETE("/buckets/:bucket/object", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.GET("/jobs", ginWrapAuth(h, h.HandleJobs))
 	// Setup/auth
 	adminG.GET("/setup/status", ginWrap(h.HandleSetupStatus))
