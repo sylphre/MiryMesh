@@ -8,6 +8,8 @@ server:
   region: "us-east-1"
   data_dir: "/var/lib/mirymesh"
 auth:
+  # master_key: "<64 hex chars, 32-byte base64, or >=32 chars>" # or MIRYMESH_MASTER_KEY env. Encrypts secret_key_enc / dsn_enc.
+  # old_master_keys: [] # Only while rotating: list the previous key(s), run "mirymesh rotate-master-key", then remove them. Env: MIRYMESH_MASTER_KEY_OLD (comma-separated).
   credentials:
     - access_key: "TESTKEY"
       secret_key: "testsecret12345"

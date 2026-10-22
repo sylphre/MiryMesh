@@ -62,8 +62,9 @@ type StorageConfig struct {
 // AuthConfig holds S3 credential settings for standalone / single-node mode.
 // Setup is now DB-backed (setup.secret_key_enc); config credentials remain for fallback.
 type AuthConfig struct {
-	Credentials []Credential `yaml:"credentials"`
-	MasterKey   string       `yaml:"master_key"` // 32-byte hex/base64 or >=32 chars; also MIRYMESH_MASTER_KEY env
+	Credentials   []Credential `yaml:"credentials"`
+	MasterKey     string       `yaml:"master_key"` // 32-byte hex/base64 or >=32 chars; also MIRYMESH_MASTER_KEY env
+	OldMasterKeys []string     `yaml:"old_master_keys"`
 }
 
 // Credential is a single S3 access key / secret pair.

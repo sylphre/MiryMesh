@@ -154,12 +154,13 @@ func main() {
 	// Setup store: DB only (file setup.json廃止). Requires DB configured.
 	var setupStore admin.SetupStoreIface
 	if cfg.DB.Driver != "" {
-		masterKey := cfg.Auth.MasterKey
-		if masterKey == "" {
-			masterKey = os.Getenv("MIRYMESH_MASTER_KEY")
-		}
+		masterKey, oldMasterKeys := cfg.Auth.MasterKeys()
 		if masterKey == "" {
 			fmt.Fprintln(os.Stderr, "controller: auth.master_key (or MIRYMESH_MASTER_KEY) required when db is configured")
+			os.Exit(1)
+		}
+		if _, krErr := metadata.NewKeyring(masterKey, oldMasterKeys...); krErr != nil {
+			fmt.Fprintf(os.Stderr, "controller: master key: %v\n", krErr)
 			os.Exit(1)
 		}
 		dbConn, openErr := metadata.OpenDB(cfg.DB.Driver, cfg.DB.DSN)
@@ -171,7 +172,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "controller: db migrate: %v\n", migErr)
 			os.Exit(1)
 		}
-		dbStore := admin.NewSetupStoreDB(dbConn, cfg.DB.Driver, masterKey)
+		dbStore := admin.NewSetupStoreDB(dbConn, cfg.DB.Driver, masterKey, oldMasterKeys...)
 		// One-time migration: if setup.json exists on disk, migrate once then rename
 		migrateFileOnce(cfg.Server.DataDir, dbStore)
 		setupStore = dbStore
@@ -187,14 +188,11 @@ func main() {
 			dbConn, openErr := metadata.OpenDB("sqlite", fallbackDSN)
 			if openErr == nil {
 				if migErr := metadata.Migrate(dbConn, "sqlite"); migErr == nil {
-					mk := cfg.Auth.MasterKey
-					if mk == "" {
-						mk = os.Getenv("MIRYMESH_MASTER_KEY")
-					}
+					mk, oldKeys := cfg.Auth.MasterKeys()
 					if mk == "" {
 						mk = "dev-master-key-32chars-1234567890"
 					}
-					dbStore := admin.NewSetupStoreDB(dbConn, "sqlite", mk)
+					dbStore := admin.NewSetupStoreDB(dbConn, "sqlite", mk, oldKeys...)
 					migrateFileOnce(cfg.Server.DataDir, dbStore)
 					setupStore = dbStore
 					slog.Info("controller: setup store: DB (sqlite fallback)", "dsn", fallbackDSN)

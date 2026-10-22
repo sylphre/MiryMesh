@@ -50,6 +50,10 @@ P0 19 ops（`ListBuckets〜ListMultipartUploads`）は全て実装、P1 はほ�
 ## Configuration
 
 - `MIRYMESH_MASTER_KEY` 必須（`auth.master_key` または env、AES-GCM）
+- マスター鍵のローテーション: 暗号文は `mk1:<鍵ID>:<base64>` 形式で保存され、現行鍵で暗号化、旧鍵は復号専用になります。旧形式（接頭辞なし）の暗号文も旧鍵・現行鍵で復号できます。手順は次のとおりです。
+  1. 新しい鍵を `auth.master_key`（または `MIRYMESH_MASTER_KEY`）に、旧い鍵を `auth.old_master_keys`（または `MIRYMESH_MASTER_KEY_OLD`、カンマ区切り）に設定する
+  2. `mirymesh rotate-master-key --config /etc/mirymesh/config.yaml [--dry-run]` で `setup.secret_key_enc` / `setup.db_dsn_enc` を現行鍵で再暗号化する（1トランザクション、冪等。`--dry-run` は書き込まない）
+  3. 全ての controller を新しい鍵で再起動し、旧鍵を設定から削除する
 - `db.driver/dsn`（`postgres/mysql/sqlite`、setup 前は `MIRYMESH_DB_DSN` で上書き可）
 - `server.mode: gateway`（`gateway` で master に S3 実体を置かず DataNode のみに）
 - `frontend/dist` は `go:embed all:dist`（`.gitkeep` で CI でも存在）

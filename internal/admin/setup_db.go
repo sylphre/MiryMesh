@@ -9,10 +9,9 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
-
-	"github.com/sylphre/MiryMesh/internal/metadata"
 )
 
 // SetupStoreDB is the DB-backed implementation (DB name mirymesh, tables: setup/sessions/pair_tokens).
@@ -25,10 +24,13 @@ type SetupStoreDB struct {
 	db        *sql.DB
 	driver    string
 	masterKey string
+	oldKeys   []string // retired master keys, decrypt-only (see metadata.Keyring)
 }
 
-func NewSetupStoreDB(db *sql.DB, driver, masterKey string) *SetupStoreDB {
-	return &SetupStoreDB{db: db, driver: strings.ToLower(driver), masterKey: masterKey}
+// NewSetupStoreDB seals secrets with masterKey. oldKeys are retired master keys that
+// are still accepted for decryption while stored values are being rotated.
+func NewSetupStoreDB(db *sql.DB, driver, masterKey string, oldKeys ...string) *SetupStoreDB {
+	return &SetupStoreDB{db: db, driver: strings.ToLower(driver), masterKey: masterKey, oldKeys: oldKeys}
 }
 
 func (s *SetupStoreDB) DB() (*sql.DB, error) {
@@ -83,15 +85,21 @@ func (s *SetupStoreDB) Get() *SetupState {
 	} else {
 		st.Initialized = true
 	}
-	mk, err := metadata.MasterKeyBytes(s.masterKey)
-	if err == nil {
-		if pt, err := metadata.DecryptGCM(mk, skEnc); err == nil {
-			st.SecretKey = pt
-		}
-		if dsnEnc != "" {
-			if pt, err := metadata.DecryptGCM(mk, dsnEnc); err == nil {
-				st.DBDSN = pt
-			}
+	kr, err := s.keyring()
+	if err != nil {
+		slog.Warn("setup: master key is invalid, stored secrets cannot be decrypted", "err", err)
+		return &st
+	}
+	if pt, derr := kr.Decrypt(skEnc); derr == nil {
+		st.SecretKey = pt
+	} else {
+		slog.Warn("setup: cannot decrypt secret_key_enc", "err", derr)
+	}
+	if dsnEnc != "" {
+		if pt, derr := kr.Decrypt(dsnEnc); derr == nil {
+			st.DBDSN = pt
+		} else {
+			slog.Warn("setup: cannot decrypt db_dsn_enc", "err", derr)
 		}
 	}
 	return &st
@@ -104,17 +112,17 @@ func (s *SetupStoreDB) Save(st *SetupState) error {
 		}
 		return errAlreadyInitialized
 	}
-	mk, err := metadata.MasterKeyBytes(s.masterKey)
+	kr, err := s.keyring()
 	if err != nil {
 		return err
 	}
-	skEnc, err := metadata.EncryptGCM(mk, st.SecretKey)
+	skEnc, err := kr.Encrypt(st.SecretKey)
 	if err != nil {
 		return err
 	}
 	dsnEnc := ""
 	if st.DBDSN != "" {
-		dsnEnc, err = metadata.EncryptGCM(mk, st.DBDSN)
+		dsnEnc, err = kr.Encrypt(st.DBDSN)
 		if err != nil {
 			return err
 		}
@@ -135,17 +143,17 @@ func (s *SetupStoreDB) Save(st *SetupState) error {
 }
 
 func (s *SetupStoreDB) Update(st *SetupState) error {
-	mk, err := metadata.MasterKeyBytes(s.masterKey)
+	kr, err := s.keyring()
 	if err != nil {
 		return err
 	}
-	skEnc, err := metadata.EncryptGCM(mk, st.SecretKey)
+	skEnc, err := kr.Encrypt(st.SecretKey)
 	if err != nil {
 		return err
 	}
 	dsnEnc := ""
 	if st.DBDSN != "" {
-		dsnEnc, err = metadata.EncryptGCM(mk, st.DBDSN)
+		dsnEnc, err = kr.Encrypt(st.DBDSN)
 		if err != nil {
 			return err
 		}

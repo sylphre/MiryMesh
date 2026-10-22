@@ -27,14 +27,18 @@ func main() {
 		runRestore()
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "rotate-master-key" {
+		os.Exit(runRotateMasterKey(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "help" || os.Args[1] == "--help" || os.Args[1] == "-h") {
 		fmt.Println("MiryMesh CLI — disaster recovery")
 		fmt.Println("  mirymesh version                         — print version")
 		fmt.Println("  mirymesh backup [--dir DIR] [--storage DIR] — write evacuation snapshot from local storage")
 		fmt.Println("  mirymesh restore [--dir DIR] [--storage DIR] [remoteDir...] — restore buckets from newest snapshot")
+		fmt.Println("  mirymesh rotate-master-key [--config FILE] [--dry-run] — re-encrypt stored secrets with the current master key")
 		return
 	}
-	fmt.Fprintln(os.Stderr, "usage: mirymesh [version|help|backup|restore]")
+	fmt.Fprintln(os.Stderr, "usage: mirymesh [version|help|backup|restore|rotate-master-key]")
 	if len(os.Args) > 1 {
 		os.Exit(1)
 	}
