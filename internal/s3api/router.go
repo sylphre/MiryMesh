@@ -64,10 +64,10 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// P2 operations that are explicitly NotImplemented in M1 (except ?policy).
+	// P2 subresources (?acl/tagging/cors/...): read-side answers, 501 for the
+	// rest — see p2_subresources.go. ?policy is handled further below.
 	q := r.URL.Query()
-	if q.Has("versioning") || q.Has("acl") || q.Has("tagging") || q.Has("cors") || q.Has("lifecycle") || q.Has("analytics") || q.Has("inventory") || q.Has("metrics") || q.Has("retention") || q.Has("legal-hold") || q.Has("select") {
-		writeError(w, r, errNotImplemented)
+	if rt.handleP2Subresource(w, r) {
 		return
 	}
 

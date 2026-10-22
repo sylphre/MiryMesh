@@ -317,10 +317,10 @@ func TestAuthRejected(t *testing.T) {
 
 func TestP2NotImplemented(t *testing.T) {
 	router, astore, signer := newTestServer(t)
-	req := signedReq(t, signer, "GET", "http://example.com/bkt?tagging", nil)
+	req := signedReq(t, signer, "GET", "http://example.com/bkt?analytics", nil)
 	rr := doReq(router, astore, req)
 	if rr.Code != http.StatusNotImplemented {
-		t.Fatalf("P2 tagging status=%d want 501", rr.Code)
+		t.Fatalf("P2 analytics status=%d want 501", rr.Code)
 	}
 	if !strings.Contains(rr.Body.String(), "NotImplemented") {
 		t.Fatalf("expected NotImplemented code")

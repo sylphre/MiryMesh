@@ -45,7 +45,7 @@ Master: Gin v1.12 で S3 `:9000` / Admin `:9001` / DataNode `:9002`。DB は `po
 
 ## S3 互換
 
-P0 19 ops（`ListBuckets〜ListMultipartUploads`）は全て実装、P1 はほぼ完了、P2（`?acl/tagging/cors/lifecycle/versioning/select` 等）は `501 NotImplemented`。配置不可は `507 InsufficientStorage`。`PUT/GET/DELETE ?policy` は `20KiB` / `MalformedPolicy` / `NoSuchBucketPolicy` で Misskey/Nextcloud の P0 は in-process と e2e で PASS。詳細は Compatibility を参照。
+P0 19 ops（`ListBuckets〜ListMultipartUploads`）は全て実装、P1 はほぼ完了、P2 サブリソースは設定を保存できないため、読み取りは実状態を返し（`GET ?versioning` は未バージョニング、`GET ?acl` は owner の `FULL_CONTROL`、`GET ?tagging/?cors/?lifecycle` は未設定）、`DELETE ?tagging/?cors/?lifecycle` は冪等に `204`、`PUT ?acl` は `x-amz-acl: private` のみ受理します。それ以外の書き込みと `analytics/inventory/metrics/retention/legal-hold/select` は `501 NotImplemented`。配置不可は `507 InsufficientStorage`。`PUT/GET/DELETE ?policy` は `20KiB` / `MalformedPolicy` / `NoSuchBucketPolicy` で Misskey/Nextcloud の P0 は in-process と e2e で PASS。詳細は Compatibility を参照。
 
 ## Configuration
 
