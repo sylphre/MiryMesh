@@ -253,9 +253,9 @@ func s3AuthMiddleware(store *auth.Store) gin.HandlerFunc {
 		}
 		// Verify via sigv4
 		lookup := func(k string) (string, bool) { return store.Secret(k) }
-		// Use net/http verify helper via s3api
-		if !s3api.VerifyRequest(c.Request, lookup) {
-			c.AbortWithStatusJSON(403, gin.H{"error": "SignatureDoesNotMatch"})
+		// Use net/http verify helper via s3api; it also decodes aws-chunked bodies.
+		if apiErr := s3api.AuthenticateRequest(c.Request, lookup); apiErr != nil {
+			c.AbortWithStatusJSON(apiErr.Status, gin.H{"error": apiErr.Code})
 			return
 		}
 		c.Next()

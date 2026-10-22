@@ -14,8 +14,22 @@ func (rt *Router) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 	rt.ServeHTTP(w, r)
 }
 
+// AuthenticateRequest checks SigV4 for Gin middleware and, for aws-chunked
+// uploads, replaces r.Body with the decoded payload. It returns nil when the
+// request may proceed.
+func AuthenticateRequest(r *http.Request, lookup func(string) (string, bool)) *APIError {
+	res, err := sigv4.Verify(r, lookup)
+	if err != nil {
+		e := errAccessDenied
+		if isSignatureError(err) {
+			e = errSignatureMismatch
+		}
+		return &e
+	}
+	return prepareStreamingBody(r, res)
+}
+
 // VerifyRequest checks SigV4 for Gin middleware.
 func VerifyRequest(r *http.Request, lookup func(string) (string, bool)) bool {
-	_, err := sigv4.Verify(r, lookup)
-	return err == nil
+	return AuthenticateRequest(r, lookup) == nil
 }

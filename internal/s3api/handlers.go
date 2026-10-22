@@ -304,18 +304,37 @@ func (rt *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		writeError(w, r, *reqTagErr)
 		return
 	}
-	m, err := rt.store.PutObject(bucket, key, ct, meta, r.Body)
+	// Content-MD5 / x-amz-checksum-* and SSE-C headers are validated before the
+	// body is consumed. The verifier sees the plaintext; encryption wraps it.
+	wantCk, wantCkErr := parseChecksumRequest(r.Header)
+	if wantCkErr != nil {
+		writeError(w, r, *wantCkErr)
+		return
+	}
+	customerKey, custErr := sseReqHeaders.parse(r.Header)
+	if custErr != nil {
+		writeError(w, r, *custErr)
+		return
+	}
+	var putBody io.Reader = r.Body
+	var putVer *ckVerifier
+	if wantCk != nil {
+		putVer = newCkVerifier(putBody, wantCk)
+		putBody = putVer
+	}
+	var putEnc *sseEncrypter
+	if customerKey != nil {
+		var encErr error
+		if putEnc, encErr = newSSEEncrypter(customerKey); encErr != nil {
+			writeFailure(w, r, encErr)
+			return
+		}
+		putBody = putEnc.wrap(putBody)
+	}
+	m, err := rt.store.PutObject(bucket, key, ct, meta, putBody)
 	if err != nil {
-		if apiErr, ok := err.(APIError); ok {
-			writeError(w, r, apiErr)
-			return
-		}
-		// Map no space to 507.
-		if isNoSpaceError(err) {
-			writeError(w, r, errInsufficient)
-			return
-		}
-		writeXMLError(w, r, http.StatusInternalServerError, "InternalError", err.Error())
+		// BadDigest (from the verifier) and storage errors alike.
+		writeFailure(w, r, err)
 		return
 	}
 	// A (re)written object starts without old tags/ACL; apply x-amz-tagging.
@@ -331,7 +350,16 @@ func (rt *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	// the local write's checksum is the source of truth — additional replicas
 	// must match it (docs/07 invariant: delete only after verified).
 	_ = targets
+	if !rt.commitObjectDocs(w, r, bucket, key, newSSERecord(putEnc, customerKey), putVer.record()) {
+		return
+	}
 	w.Header().Set("ETag", `"`+m.ETag+`"`)
+	if ck := putVer.record(); ck != nil {
+		ck.setHeaders(w.Header())
+	}
+	if customerKey != nil {
+		sseEcho(w.Header(), customerKey.md5)
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -356,6 +384,20 @@ func (rt *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		w.Header().Set("Last-Modified", meta.LastMod.UTC().Format(http.TimeFormat))
 		w.WriteHeader(http.StatusNotModified)
 		return
+	}
+	// SSE-C objects need the customer key; the wrapper returns plaintext so
+	// Range and Content-Length keep working on the original size.
+	rc, customerKey, decErr := rt.decryptForRead(r.Header, sseReqHeaders, bucket, key, meta.Size, rc)
+	if decErr != nil {
+		writeFailure(w, r, decErr)
+		return
+	}
+	// Whole-object checksums are not valid for a partial response.
+	if r.Header.Get("Range") == "" {
+		if cerr := rt.setChecksumHeaders(w.Header(), r.Header, bucket, key); cerr != nil {
+			writeFailure(w, r, cerr)
+			return
+		}
 	}
 	status := http.StatusOK
 	var size = meta.Size
@@ -402,6 +444,9 @@ func (rt *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	for k, v := range meta.Meta {
 		w.Header().Set("X-Amz-Meta-"+k, v)
 	}
+	if customerKey != nil {
+		sseEcho(w.Header(), customerKey.md5)
+	}
 	w.WriteHeader(status)
 	_, _ = io.Copy(w, bodyReader)
 	if mRecorder != nil {
@@ -420,6 +465,24 @@ func (rt *Router) handleHeadObject(w http.ResponseWriter, r *http.Request, bucke
 			writeError(w, r, apiErr)
 			return
 		}
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	// An SSE-C object is only visible to a caller that presents its key.
+	sseRec, sseLoadErr := rt.loadSSE(bucket, key)
+	if sseLoadErr != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	customerKey, sseAuthErr := sseAuthorize(r.Header, sseReqHeaders, sseRec)
+	if sseAuthErr != nil {
+		w.WriteHeader(sseAuthErr.Status)
+		return
+	}
+	if customerKey != nil {
+		sseEcho(w.Header(), customerKey.md5)
+	}
+	if ckErr := rt.setChecksumHeaders(w.Header(), r.Header, bucket, key); ckErr != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

@@ -57,6 +57,12 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		return
 	}
 	defer rc.Close()
+	// SSE-C source: the copy-source headers decrypt it (and reject a wrong key).
+	rc, _, srcSSEErr := rt.decryptForRead(r.Header, sseCopyHeaders, srcBucket, srcKey, srcMeta.Size, rc)
+	if srcSSEErr != nil {
+		writeFailure(w, r, srcSSEErr)
+		return
+	}
 	// Preconditions x-amz-copy-source-if-*
 	cond := parseCopyConditions(r)
 	if hasAnyCopyCondition(cond) {
@@ -83,6 +89,17 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		}
 		srcData = srcData[start : end+1]
 	}
+	// The part follows the upload's settings: same SSE-C key, same checksum algorithm.
+	cfg, cfgErr := rt.loadMPConfig(bucket, uploadID)
+	if cfgErr != nil {
+		writeFailure(w, r, cfgErr)
+		return
+	}
+	pw, prepErr := preparePart(r.Header, cfg, strings.NewReader(string(srcData)))
+	if prepErr != nil {
+		writeFailure(w, r, prepErr)
+		return
+	}
 	// Write part file via streaming hash (already have srcData but keep streaming path for consistency).
 	dir := rt.store.MultipartDir(uploadID)
 	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
@@ -97,7 +114,7 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		return
 	}
 	h := md5.New()
-	if _, copyErr := io.Copy(io.MultiWriter(f, h), strings.NewReader(string(srcData))); copyErr != nil {
+	if _, copyErr := io.Copy(io.MultiWriter(f, h), pw.body); copyErr != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		writeXMLError(w, r, 500, "InternalError", copyErr.Error())
@@ -121,16 +138,26 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		}
 		st.Parts[partNumber] = rec
 	}
+	if doc := pw.doc(cfg); doc != (mpPart{}) {
+		if perr := rt.putDoc(bucket, mpPartKey(uploadID, partNumber), subMPPart, doc); perr != nil {
+			writeFailure(w, r, perr)
+			return
+		}
+	}
+	if pw.key != nil {
+		sseEcho(w.Header(), pw.key.md5)
+	}
 	type resp struct {
 		XMLName      xml.Name `xml:"CopyPartResult"`
 		Xmlns        string   `xml:"xmlns,attr"`
 		ETag         string   `xml:"ETag"`
 		LastModified string   `xml:"LastModified"`
+		ChecksumXML
 	}
 	// Use source last modified? S3 uses part copy time; return now.
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(200)
-	_ = xml.NewEncoder(w).Encode(resp{Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/", ETag: `"` + etag + `"`, LastModified: srcMeta.LastMod.UTC().Format("2006-01-02T15:04:05.000Z")})
+	_ = xml.NewEncoder(w).Encode(resp{Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/", ETag: `"` + etag + `"`, LastModified: srcMeta.LastMod.UTC().Format("2006-01-02T15:04:05.000Z"), ChecksumXML: pw.ver.record().toXML()})
 	_ = io.Discard
 }
 

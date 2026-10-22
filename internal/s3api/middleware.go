@@ -38,7 +38,12 @@ func AuthMiddleware(store *auth.Store, next http.Handler) http.Handler {
 			writeError(w, r, errAccessDenied)
 			return
 		}
-		_ = res
+		// aws-chunked (STREAMING-*) bodies are decoded, and their chunk
+		// signatures checked, before any handler sees the body.
+		if perr := prepareStreamingBody(r, res); perr != nil {
+			writeError(w, r, *perr)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

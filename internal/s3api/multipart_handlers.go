@@ -25,6 +25,16 @@ func (rt *Router) handleCreateMultipartUpload(w http.ResponseWriter, r *http.Req
 			meta[lk[len("x-amz-meta-"):]] = strings.Join(vs, ",")
 		}
 	}
+	mpAlgo, mpType, mpCkErr := parseMultipartChecksum(r.Header)
+	if mpCkErr != nil {
+		writeError(w, r, *mpCkErr)
+		return
+	}
+	customerKey, custErr := sseReqHeaders.parse(r.Header)
+	if custErr != nil {
+		writeError(w, r, *custErr)
+		return
+	}
 	st, err := rt.store.CreateMultipartUpload(bucket, key, ct, meta)
 	if err != nil {
 		if apiErr, ok := err.(APIError); ok {
@@ -33,6 +43,29 @@ func (rt *Router) handleCreateMultipartUpload(w http.ResponseWriter, r *http.Req
 		}
 		writeXMLError(w, r, 500, "InternalError", err.Error())
 		return
+	}
+	// Remember the upload-wide settings: every part must use the same key and
+	// checksum algorithm, and Complete needs them to build the object records.
+	var cfg mpConfig
+	if customerKey != nil {
+		cfg.KeyMD5 = customerKey.md5
+	}
+	if mpAlgo != nil {
+		cfg.Algo, cfg.Type = mpAlgo.name, mpType
+	}
+	if cfg != (mpConfig{}) {
+		if perr := rt.putDoc(bucket, mpConfigKey(st.UploadID), subMPConfig, cfg); perr != nil {
+			_ = rt.store.AbortMultipartUpload(st.UploadID)
+			writeFailure(w, r, perr)
+			return
+		}
+	}
+	if mpAlgo != nil {
+		w.Header().Set("X-Amz-Checksum-Algorithm", mpAlgo.name)
+		w.Header().Set("X-Amz-Checksum-Type", mpType)
+	}
+	if customerKey != nil {
+		sseEcho(w.Header(), customerKey.md5)
 	}
 	type resp struct {
 		XMLName  xml.Name `xml:"InitiateMultipartUploadResult"`
@@ -59,20 +92,36 @@ func (rt *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 		writeError(w, r, errInvalidRequest)
 		return
 	}
-	rec, err2 := rt.store.UploadPart(uploadID, partNumber, r.Body)
-	if err2 != nil {
-		if apiErr, ok := err2.(APIError); ok {
-			writeError(w, r, apiErr)
-			return
-		}
-		writeXMLError(w, r, 400, "InvalidRequest", err2.Error())
+	// The upload must belong to this bucket/key before the body is consumed.
+	up := rt.store.GetUpload(uploadID)
+	if up == nil || up.Bucket != bucket || up.Key != key {
+		writeError(w, r, errUploadGone)
 		return
 	}
-	// Validate bucket/key match upload?
-	s := rt.store.GetUpload(uploadID)
-	if s != nil && (s.Bucket != bucket || s.Key != key) {
-		writeError(w, r, APIError{Code: "NoSuchUpload", Message: "The specified upload does not exist", Status: 404})
+	cfg, cfgErr := rt.loadMPConfig(bucket, uploadID)
+	if cfgErr != nil {
+		writeFailure(w, r, cfgErr)
 		return
+	}
+	pw, prepErr := preparePart(r.Header, cfg, r.Body)
+	if prepErr != nil {
+		writeFailure(w, r, prepErr)
+		return
+	}
+	rec, err2 := rt.store.UploadPart(uploadID, partNumber, pw.body)
+	if err2 != nil {
+		writeFailure(w, r, err2)
+		return
+	}
+	if doc := pw.doc(cfg); doc != (mpPart{}) {
+		if perr := rt.putDoc(bucket, mpPartKey(uploadID, partNumber), subMPPart, doc); perr != nil {
+			writeFailure(w, r, perr)
+			return
+		}
+	}
+	pw.ver.setHeader(w.Header())
+	if pw.key != nil {
+		sseEcho(w.Header(), pw.key.md5)
 	}
 	w.Header().Set("ETag", `"`+rec.ETag+`"`)
 	w.WriteHeader(200)
@@ -125,6 +174,7 @@ func (rt *Router) handleAbortMultipart(w http.ResponseWriter, r *http.Request, b
 		writeError(w, r, errInvalidRequest)
 		return
 	}
+	up := rt.store.GetUpload(uploadID)
 	if err := rt.store.AbortMultipartUpload(uploadID); err != nil {
 		if apiErr, ok := err.(APIError); ok {
 			writeError(w, r, apiErr)
@@ -133,6 +183,7 @@ func (rt *Router) handleAbortMultipart(w http.ResponseWriter, r *http.Request, b
 		writeXMLError(w, r, 500, "InternalError", err.Error())
 		return
 	}
+	rt.dropUploadDocs(up)
 	w.WriteHeader(204)
 }
 
@@ -151,6 +202,7 @@ func (rt *Router) handleCompleteMultipart(w http.ResponseWriter, r *http.Request
 	type completePartXML struct {
 		PartNumber int    `xml:"PartNumber"`
 		ETag       string `xml:"ETag"`
+		ChecksumXML
 	}
 	type completeReq struct {
 		XMLName xml.Name          `xml:"CompleteMultipartUpload"`
@@ -167,25 +219,37 @@ func (rt *Router) handleCompleteMultipart(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var parts []CompletePart
+	partSums := make([]ChecksumXML, 0, len(req.Parts))
 	for _, p := range req.Parts {
 		parts = append(parts, CompletePart{PartNumber: p.PartNumber, ETag: p.ETag})
+		partSums = append(partSums, p.ChecksumXML)
 	}
 	// Completing replaces the object at key: a protected object must stay intact.
 	if rt.rejectLocked(w, r, bucket, key) {
 		return
 	}
+	// Work out the SSE-C segments and aggregate checksum first: this only reads
+	// state, so a bad part list leaves the upload intact.
+	plan, planErr := rt.planComplete(bucket, key, uploadID, parts, partSums, r.Header)
+	if planErr != nil {
+		writeFailure(w, r, planErr)
+		return
+	}
 	meta, err2 := rt.store.CompleteMultipartUpload(uploadID, parts)
 	if err2 != nil {
-		if apiErr, ok := err2.(APIError); ok {
-			writeError(w, r, apiErr)
-			return
-		}
-		writeXMLError(w, r, 500, "InternalError", err2.Error())
+		writeFailure(w, r, err2)
 		return
 	}
 	// The completed upload is a new object: it must not inherit old tags/ACL.
 	if !rt.commitObjectTags(w, r, bucket, key, "") {
 		return
+	}
+	if !rt.commitObjectDocs(w, r, bucket, key, plan.sse, plan.ck) {
+		return
+	}
+	rt.dropUploadDocs(plan.up)
+	if plan.sse != nil {
+		sseEcho(w.Header(), plan.sse.KeyMD5)
 	}
 	type resp struct {
 		XMLName  xml.Name `xml:"CompleteMultipartUploadResult"`
@@ -194,10 +258,12 @@ func (rt *Router) handleCompleteMultipart(w http.ResponseWriter, r *http.Request
 		Bucket   string   `xml:"Bucket"`
 		Key      string   `xml:"Key"`
 		ETag     string   `xml:"ETag"`
+		ChecksumXML
+		ChecksumType string `xml:"ChecksumType,omitempty"`
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(200)
-	_ = xml.NewEncoder(w).Encode(resp{Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/", Bucket: bucket, Key: key, Location: "/" + bucket + "/" + key, ETag: `"` + meta.ETag + `"`})
+	_ = xml.NewEncoder(w).Encode(resp{Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/", Bucket: bucket, Key: key, Location: "/" + bucket + "/" + key, ETag: `"` + meta.ETag + `"`, ChecksumXML: plan.ck.toXML(), ChecksumType: plan.ck.typ()})
 }
 
 func (rt *Router) handleListMultipartUploads(w http.ResponseWriter, r *http.Request, bucket string) {

@@ -67,6 +67,15 @@ type VerifyResult struct {
 	Region    string
 	Service   string
 	SignedAt  time.Time
+	// PayloadHash is the X-Amz-Content-Sha256 the request was signed with: a
+	// hex digest, UNSIGNED-PAYLOAD or one of the STREAMING-* markers.
+	PayloadHash string
+
+	// Kept so an aws-chunked body can be checked chunk by chunk.
+	signingKey []byte
+	amzDate    string
+	scope      string
+	signature  string
 }
 
 // Verify verifies an incoming SigV4 signed HTTP request.
@@ -127,8 +136,9 @@ func verifyHeader(r *http.Request, lookup func(string) (string, bool)) (VerifyRe
 	if payloadHash == "" {
 		return VerifyResult{}, errors.New("missing X-Amz-Content-Sha256")
 	}
-	// Allow UNSIGNED-PAYLOAD for streaming; verify still uses the literal string.
-	if payloadHash != "UNSIGNED-PAYLOAD" {
+	// UNSIGNED-PAYLOAD and the STREAMING-* markers are used literally in the
+	// canonical request; the chunk signatures are checked while the body is read.
+	if payloadHash != "UNSIGNED-PAYLOAD" && !IsStreamingPayload(payloadHash) {
 		if len(payloadHash) != 64 {
 			return VerifyResult{}, errors.New("invalid X-Amz-Content-Sha256 length")
 		}
@@ -148,7 +158,17 @@ func verifyHeader(r *http.Request, lookup func(string) (string, bool)) (VerifyRe
 	if !hmac.Equal([]byte(expected), []byte(signature)) {
 		return VerifyResult{}, errors.New("signature mismatch")
 	}
-	return VerifyResult{AccessKey: accessKey, Region: region, Service: service, SignedAt: signedAt}, nil
+	return VerifyResult{
+		AccessKey:   accessKey,
+		Region:      region,
+		Service:     service,
+		SignedAt:    signedAt,
+		PayloadHash: payloadHash,
+		signingKey:  signingKey,
+		amzDate:     amzDate,
+		scope:       credentialScopeStr(credentialScope),
+		signature:   signature,
+	}, nil
 }
 
 func verifyPresigned(r *http.Request, lookup func(string) (string, bool)) (VerifyResult, error) {

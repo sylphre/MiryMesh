@@ -332,12 +332,18 @@ func (rt *Router) handleSelect(w http.ResponseWriter, r *http.Request, bucket, k
 		writeError(w, r, selAPIError(parseErr))
 		return
 	}
-	_, rc, getErr := rt.store.GetObject(bucket, key)
+	objMeta, rc, getErr := rt.store.GetObject(bucket, key)
 	if getErr != nil {
 		writeStoreFailure(w, r, getErr)
 		return
 	}
 	defer rc.Close()
+	// SSE-C objects are queried through their plaintext.
+	rc, _, decErr := rt.decryptForRead(r.Header, sseReqHeaders, bucket, key, objMeta.Size, rc)
+	if decErr != nil {
+		writeFailure(w, r, decErr)
+		return
+	}
 
 	scanned := &selCounter{r: rc}
 	decoded, openErr := selOpenInput(scanned, req.input)

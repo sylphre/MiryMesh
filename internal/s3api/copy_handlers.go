@@ -39,6 +39,12 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 		return
 	}
 	defer rc.Close()
+	// SSE-C source: the copy-source headers decrypt it (and reject a wrong key).
+	rc, _, srcSSEErr := rt.decryptForRead(r.Header, sseCopyHeaders, srcBucket, srcKey, srcMeta.Size, rc)
+	if srcSSEErr != nil {
+		writeFailure(w, r, srcSSEErr)
+		return
+	}
 	// 5GiB copy limit (docs/06): S3 says copy source must be <=5GiB. Enforce before reading.
 	if srcMeta.Size > 5*1024*1024*1024 {
 		writeError(w, r, APIError{Code: "InvalidRequest", Message: "The specified copy source is larger than the maximum allowable size for a copy source (5 GiB)", Status: 400})
@@ -110,22 +116,63 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 			destTags = doc
 		}
 	}
-	m, err4 := rt.store.PutObject(destBucket, destKey, ct, dstMeta, rc)
+	// Destination SSE-C and checksum, resolved before the write because the
+	// destination may be the source object. An explicit x-amz-checksum-algorithm
+	// is computed over the plaintext; otherwise a FULL_OBJECT source checksum
+	// carries over (the bytes are identical).
+	destCK, destSSEErr := sseReqHeaders.parse(r.Header)
+	if destSSEErr != nil {
+		writeError(w, r, *destSSEErr)
+		return
+	}
+	var copyBody io.Reader = rc
+	var copyVer *ckVerifier
+	var carriedCk *ckRecord
+	if name := strings.TrimSpace(r.Header.Get("X-Amz-Checksum-Algorithm")); name != "" {
+		algo := ckAlgoByName(name)
+		if algo == nil {
+			writeError(w, r, *p2BadRequest("InvalidRequest", "Checksum algorithm provided is unsupported. Please try again with any of the valid types: [CRC32, CRC32C, CRC64NVME, SHA1, SHA256]"))
+			return
+		}
+		copyVer = newCkVerifier(copyBody, &ckRequest{algo: algo})
+		copyBody = copyVer
+	} else {
+		var ckLoadErr error
+		if carriedCk, ckLoadErr = rt.loadChecksum(srcBucket, srcKey); ckLoadErr != nil {
+			writeFailure(w, r, ckLoadErr)
+			return
+		}
+		if carriedCk != nil && carriedCk.Type != ckTypeFullObject {
+			carriedCk = nil
+		}
+	}
+	var destEnc *sseEncrypter
+	if destCK != nil {
+		var encErr error
+		if destEnc, encErr = newSSEEncrypter(destCK); encErr != nil {
+			writeFailure(w, r, encErr)
+			return
+		}
+		copyBody = destEnc.wrap(copyBody)
+	}
+	m, err4 := rt.store.PutObject(destBucket, destKey, ct, dstMeta, copyBody)
 	if err4 != nil {
-		if apiErr, ok := err4.(APIError); ok {
-			writeError(w, r, apiErr)
-			return
-		}
-		if isNoSpaceError(err4) {
-			writeError(w, r, errInsufficient)
-			return
-		}
-		writeXMLError(w, r, 500, "InternalError", err4.Error())
+		writeFailure(w, r, err4)
 		return
 	}
 	// The copy is a new object: reset its subresources and apply the resolved tags.
 	if !rt.commitObjectTags(w, r, destBucket, destKey, destTags) {
 		return
+	}
+	destCk := carriedCk
+	if copyVer != nil {
+		destCk = copyVer.record()
+	}
+	if !rt.commitObjectDocs(w, r, destBucket, destKey, newSSERecord(destEnc, destCK), destCk) {
+		return
+	}
+	if destCK != nil {
+		sseEcho(w.Header(), destCK.md5)
 	}
 	type resp struct {
 		XMLName      xml.Name `xml:"CopyObjectResult"`

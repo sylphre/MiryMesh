@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Management GUI (plain HTML/CSS/JS, no build) and `/api/admin/*` + `/internal/*`.
 - Packaging via `nfpm` (DEB/RPM), `systemd` units, `Dockerfile` (distroless).
 - CI: `ci.yml` (lint-test, e2e, packaging, linux-matrix, e2e-external).
+- S3 SSE-C (AES-256-CTR, copy-source keys, multipart) and checksum validation (`Content-MD5`, CRC32/CRC32C/CRC64NVME/SHA1/SHA256, COMPOSITE / FULL_OBJECT multipart checksums, `x-amz-checksum-mode`).
+- S3 `aws-chunked` request bodies: `STREAMING-AWS4-HMAC-SHA256-PAYLOAD[-TRAILER]` and `STREAMING-UNSIGNED-PAYLOAD-TRAILER` with chunk/trailer signature verification and trailing `x-amz-checksum-*` validation.
 
 ## [0.0.0-dev] - Initial
 - Repository scaffolding and Phase 0 baseline.
