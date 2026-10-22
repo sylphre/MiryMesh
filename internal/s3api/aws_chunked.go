@@ -23,7 +23,9 @@ package s3api
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"hash"
 	"io"
@@ -35,10 +37,12 @@ import (
 )
 
 const (
-	// A signed chunk is held in memory until its signature is verified.
-	awsChunkMaxSigned = 16 << 20
-	awsChunkMaxLine   = 4096
-	awsChunkMaxTrail  = 16 << 10
+	// A signed chunk up to this size is held in memory and verified before any
+	// of its bytes reach the handler. A larger one is streamed and hashed on the
+	// fly; its signature is checked before its last byte is handed out.
+	awsChunkBufMax   = 16 << 20
+	awsChunkMaxLine  = 4096
+	awsChunkMaxTrail = 16 << 10
 )
 
 var (
@@ -73,9 +77,13 @@ type awsChunkedReader struct {
 
 	buf    []byte // current verified signed chunk
 	pos    int
-	remain int64 // unread bytes of the current unsigned chunk
-	done   bool
-	err    error
+	remain int64 // unread bytes of the current streamed chunk
+
+	sigHash hash.Hash // hashes a streamed signed chunk; nil otherwise
+	sigWant string    // the chunk-signature announced for it
+
+	done bool
+	err  error
 }
 
 func (c *awsChunkedReader) fail(err error) error {
@@ -116,6 +124,9 @@ func (c *awsChunkedReader) Read(p []byte) (int, error) {
 			}
 			n, err := c.src.Read(p)
 			c.account(p[:n])
+			if c.sigHash != nil {
+				_, _ = c.sigHash.Write(p[:n])
+			}
 			c.remain -= int64(n)
 			if err != nil {
 				return n, c.fail(chunkReadErr(err))
@@ -123,6 +134,15 @@ func (c *awsChunkedReader) Read(p []byte) (int, error) {
 			if c.remain == 0 {
 				if cerr := c.expectCRLF(); cerr != nil {
 					return n, c.fail(cerr)
+				}
+				if c.sigHash != nil {
+					sum := hex.EncodeToString(c.sigHash.Sum(nil))
+					c.sigHash = nil
+					if !sigv4.SignatureEqual(c.signer.ChunkSum(sum), c.sigWant) {
+						// Nothing of the final piece is delivered; the handler
+						// sees the error instead of a complete body.
+						return 0, c.fail(errSignatureMismatch)
+					}
 				}
 			}
 			if n > 0 {
@@ -163,8 +183,9 @@ func (c *awsChunkedReader) expectCRLF() error {
 	return nil
 }
 
-// nextChunk reads one chunk header. A signed chunk is read and verified as a
-// whole; an unsigned one is streamed through Read.
+// nextChunk reads one chunk header. A signed chunk of up to awsChunkBufMax is
+// read and verified as a whole; a larger signed chunk and every unsigned one
+// are streamed through Read.
 func (c *awsChunkedReader) nextChunk() error {
 	line, err := c.readLine()
 	if err != nil {
@@ -194,8 +215,12 @@ func (c *awsChunkedReader) nextChunk() error {
 		c.remain = int64(size)
 		return nil
 	}
-	if size > awsChunkMaxSigned {
-		return *p2BadRequest("InvalidRequest", "An aws-chunked chunk is larger than the supported "+strconv.Itoa(awsChunkMaxSigned)+" bytes")
+	if size > awsChunkBufMax {
+		// Too large to hold in memory: stream it and verify at its end.
+		c.remain = int64(size)
+		c.sigHash = sha256.New()
+		c.sigWant = gotSig
+		return nil
 	}
 	if uint64(cap(c.buf)) < size {
 		c.buf = make([]byte, size)

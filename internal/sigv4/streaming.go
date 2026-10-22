@@ -84,13 +84,19 @@ func (r VerifyResult) StreamSigner() *StreamSigner {
 
 // Chunk signs one chunk of data (the final, empty chunk uses nil).
 func (s *StreamSigner) Chunk(data []byte) string {
+	return s.ChunkSum(sha256Hex(data))
+}
+
+// ChunkSum signs one chunk given the hex SHA-256 of its data. It lets callers
+// hash a large chunk incrementally instead of holding it in memory.
+func (s *StreamSigner) ChunkSum(payloadSHA256Hex string) string {
 	sts := strings.Join([]string{
 		"AWS4-HMAC-SHA256-PAYLOAD",
 		s.amzDate,
 		s.scope,
 		s.prev,
 		emptySHA256,
-		sha256Hex(data),
+		payloadSHA256Hex,
 	}, "\n")
 	s.prev = calcSignature(s.key, sts)
 	return s.prev

@@ -320,3 +320,44 @@ func TestAWSChunkedContentEncodingStripped(t *testing.T) {
 		t.Fatal("Content-Encoding must be removed when only aws-chunked was listed")
 	}
 }
+
+// A signed chunk larger than awsChunkBufMax is streamed and verified at its end.
+func TestAWSChunkedLargeSignedChunk(t *testing.T) {
+	e := newIntegrityEnv(t)
+	payload := bytes.Repeat([]byte("0123456789abcdef"), (awsChunkBufMax+(1<<20))/16) // 17 MiB
+	decl, trailers := trailerFor("CRC32", payload)
+
+	cases := []struct {
+		name string
+		spec chunkedSpec
+	}{
+		{"signed one chunk", chunkedSpec{payloadHash: sigv4.PayloadStreamingSigned, chunkSize: len(payload)}},
+		{"signed two chunks", chunkedSpec{payloadHash: sigv4.PayloadStreamingSigned, chunkSize: len(payload)/2 + 1}},
+		{"signed+trailer", chunkedSpec{payloadHash: sigv4.PayloadStreamingSignedTrailer, chunkSize: len(payload), declare: decl, trailers: trailers}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			key := "large-" + strings.ReplaceAll(tc.name, " ", "-")
+			if rr := e.streamPut(key, payload, tc.spec, nil); rr.Code != http.StatusOK {
+				t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String())
+			}
+			got := e.do("GET", e.objPath(key), nil, nil)
+			if got.Code != http.StatusOK || !bytes.Equal(got.Body.Bytes(), payload) {
+				t.Fatalf("GET status=%d, payload differs (len=%d want %d)", got.Code, got.Body.Len(), len(payload))
+			}
+		})
+	}
+
+	t.Run("tampered data is rejected and the old object is kept", func(t *testing.T) {
+		e.mustPut("large-keep", []byte("original"), nil)
+		spec := chunkedSpec{payloadHash: sigv4.PayloadStreamingSigned, chunkSize: len(payload), mutate: func(b []byte) []byte {
+			b[len(b)/2] ^= 0xFF
+			return b
+		}}
+		wantErr(t, e.streamPut("large-keep", payload, spec, nil), http.StatusForbidden, "SignatureDoesNotMatch")
+		if got := e.do("GET", e.objPath("large-keep"), nil, nil); got.Body.String() != "original" {
+			t.Fatalf("object replaced by a failed upload (len=%d)", got.Body.Len())
+		}
+	})
+}
