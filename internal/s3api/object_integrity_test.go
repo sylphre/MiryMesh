@@ -458,8 +458,8 @@ func TestIntegrityCopyCarriesFullObjectChecksum(t *testing.T) {
 		t.Fatalf("copied CRC32C=%q want %q", got, want)
 	}
 	// An explicit algorithm computes a new checksum over the copied bytes.
-	if rr := e.do("PUT", e.objPath("cdst2"), nil, map[string]string{"X-Amz-Copy-Source": "/" + e.bucket + "/csrc", "X-Amz-Checksum-Algorithm": "SHA1"}); rr.Code != http.StatusOK {
-		t.Fatalf("copy with algorithm status=%d body=%s", rr.Code, rr.Body.String())
+	if cp := e.do("PUT", e.objPath("cdst2"), nil, map[string]string{"X-Amz-Copy-Source": "/" + e.bucket + "/csrc", "X-Amz-Checksum-Algorithm": "SHA1"}); cp.Code != http.StatusOK {
+		t.Fatalf("copy with algorithm status=%d body=%s", cp.Code, cp.Body.String())
 	}
 	rr = e.do("HEAD", e.objPath("cdst2"), nil, map[string]string{"X-Amz-Checksum-Mode": "ENABLED"})
 	if got, w := rr.Header().Get("X-Amz-Checksum-Sha1"), ckSumBase64(ckAlgoByName("SHA1"), body); got != w {

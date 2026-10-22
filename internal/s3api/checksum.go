@@ -221,14 +221,6 @@ func (v *ckVerifier) finish() *APIError {
 	return nil
 }
 
-// raw returns the raw digest once the body was fully read; nil-safe.
-func (v *ckVerifier) raw() []byte {
-	if v == nil {
-		return nil
-	}
-	return v.sum
-}
-
 // record returns the whole-object checksum record; nil-safe.
 func (v *ckVerifier) record() *ckRecord {
 	if v == nil || v.sum == nil || v.req.algo == nil {
