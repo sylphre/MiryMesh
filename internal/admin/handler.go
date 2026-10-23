@@ -11,6 +11,7 @@ import (
 	"github.com/sylphre/MiryMesh/internal/placement"
 	"github.com/sylphre/MiryMesh/internal/replication"
 	"github.com/sylphre/MiryMesh/internal/s3api"
+	"github.com/sylphre/MiryMesh/internal/users"
 )
 
 // SetupStoreIface is implemented by file (*SetupStore) and DB (*SetupStoreDB).
@@ -37,6 +38,7 @@ type Handler struct {
 	metrics    *Metrics
 	dbDriver   string
 	dbDSN      string
+	userMgr    *users.Manager
 }
 
 // New creates a Handler.
@@ -72,6 +74,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/jobs", h.handleJobs)
 	mux.HandleFunc("/api/admin/cluster", h.handleCluster)
 	mux.HandleFunc("/api/admin/metrics", h.handleMetrics)
+	mux.HandleFunc("/api/admin/users", h.handleUsers)
+	mux.HandleFunc("/api/admin/users/", h.handleUsers)
 	h.setupRoutes(mux)
 	if h.setupStore != nil {
 		// Also expose config endpoints

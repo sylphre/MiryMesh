@@ -21,6 +21,7 @@ import (
 	"github.com/sylphre/MiryMesh/internal/config"
 	"github.com/sylphre/MiryMesh/internal/datanode"
 	"github.com/sylphre/MiryMesh/internal/s3api"
+	"github.com/sylphre/MiryMesh/internal/users"
 )
 
 func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDir string, cfg config.Config, reg *datanode.Registry, internalToken string) *gin.Engine {
@@ -52,6 +53,14 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 	adminG.PUT("/buckets/:bucket/object", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.DELETE("/buckets/:bucket/object", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.GET("/jobs", ginWrapAuth(h, h.HandleJobs))
+	// S3 users (access keys + per-bucket permissions)
+	adminG.GET("/users", ginWrapAuth(h, h.HandleUsers))
+	adminG.POST("/users", ginWrapAuth(h, h.HandleUsers))
+	adminG.GET("/users/:name", ginWrapAuth(h, h.HandleUsers))
+	adminG.PATCH("/users/:name", ginWrapAuth(h, h.HandleUsers))
+	adminG.DELETE("/users/:name", ginWrapAuth(h, h.HandleUsers))
+	adminG.PUT("/users/:name/permissions", ginWrapAuth(h, h.HandleUsers))
+	adminG.POST("/users/:name/rotate-key", ginWrapAuth(h, h.HandleUsers))
 	// Setup/auth
 	adminG.GET("/setup/status", ginWrap(h.HandleSetupStatus))
 	adminG.POST("/setup", ginWrap(h.HandleSetup))
@@ -164,7 +173,7 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 	return r
 }
 
-func newS3Engine(router *s3api.Router, authStore *auth.Store, cfg config.Config, reg *datanode.Registry, internalToken string, setupStore admin.SetupStoreIface) *gin.Engine {
+func newS3Engine(router *s3api.Router, authStore *auth.Store, userMgr *users.Manager, cfg config.Config, reg *datanode.Registry, internalToken string, setupStore admin.SetupStoreIface) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -190,7 +199,7 @@ func newS3Engine(router *s3api.Router, authStore *auth.Store, cfg config.Config,
 		c.String(404, "admin API lives on admin port — use that port with X-Admin-Token")
 	})
 	// S3 catch-all with SigV4 middleware — must not conflict with /internal/* static routes
-	r.Use(s3AuthMiddleware(authStore))
+	r.Use(s3AuthMiddleware(authStore, userMgr))
 	r.NoRoute(func(c *gin.Context) {
 		// Gin's /*path conflicts with /internal/* static routes, so S3 catch-all is via NoRoute
 		router.HandleHTTP(c.Writer, c.Request)
@@ -230,13 +239,15 @@ func (w *ginResponseWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
-func s3AuthMiddleware(store *auth.Store) gin.HandlerFunc {
+// s3AuthMiddleware verifies SigV4 against the root credentials and the S3 users. Root keys may do
+// anything; a user key is limited to the buckets and permissions granted to it.
+func s3AuthMiddleware(store *auth.Store, userMgr *users.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.URL.Path == "/healthz" || c.Request.URL.Path == "/health" {
 			c.Next()
 			return
 		}
-		if store.Count() == 0 {
+		if store.Count() == 0 && userMgr.Count() == 0 {
 			if c.GetHeader("Authorization") != "" || c.Query("X-Amz-Algorithm") != "" {
 				c.AbortWithStatusJSON(403, gin.H{"error": "AccessDenied"})
 				return
@@ -245,11 +256,28 @@ func s3AuthMiddleware(store *auth.Store) gin.HandlerFunc {
 			return
 		}
 		// Verify via sigv4
-		lookup := func(k string) (string, bool) { return store.Secret(k) }
+		lookup := func(k string) (string, bool) {
+			if s, ok := store.Secret(k); ok {
+				return s, true
+			}
+			return userMgr.Secret(k)
+		}
 		// Use net/http verify helper via s3api; it also decodes aws-chunked bodies.
-		if apiErr := s3api.AuthenticateRequest(c.Request, lookup); apiErr != nil {
+		accessKey, apiErr := s3api.AuthenticateRequestAK(c.Request, lookup)
+		if apiErr != nil {
 			c.AbortWithStatusJSON(apiErr.Status, gin.H{"error": apiErr.Code})
 			return
+		}
+		if !store.Exists(accessKey) {
+			// A user key: only what its grants allow.
+			reqs, ok := users.Required(c.Request)
+			if !ok || !userMgr.Authorize(accessKey, reqs) {
+				c.AbortWithStatusJSON(403, gin.H{"error": "AccessDenied"})
+				return
+			}
+			if len(reqs) == 0 { // ListBuckets: show only the buckets the user can access
+				c.Request = s3api.WithBucketFilter(c.Request, func(b string) bool { return userMgr.CanSee(accessKey, b) })
+			}
 		}
 		c.Next()
 	}

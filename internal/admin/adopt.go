@@ -120,7 +120,7 @@ func (h *Handler) HandleAdoptNode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("DataNode (%s) に接続できません: %v", addr, err), http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotFound:

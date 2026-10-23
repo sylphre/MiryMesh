@@ -22,6 +22,7 @@ const bare = computed(() => route.path === '/login' || route.path === '/setup')
 const items = [
   { to: '/', label: 'Dashboard', icon: 'dashboard', exact: true },
   { to: '/buckets', label: 'Buckets', icon: 'bucket' },
+  { to: '/users', label: 'Users', icon: 'users' },
   { to: '/nodes', label: 'Nodes', icon: 'server' },
   { to: '/disks', label: 'Disks', icon: 'disk' },
   { to: '/jobs', label: 'Jobs', icon: 'activity' },

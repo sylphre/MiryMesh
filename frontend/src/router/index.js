@@ -14,6 +14,7 @@ const routes = [
   { path: '/disks', component: () => import('../views/Disks.vue'), meta: { requiresAuth: true } },
   { path: '/buckets', component: () => import('../views/Buckets.vue'), meta: { requiresAuth: true } },
   { path: '/buckets/:name', component: () => import('../views/BucketDetail.vue'), meta: { requiresAuth: true } },
+  { path: '/users', component: () => import('../views/Users.vue'), meta: { requiresAuth: true } },
   { path: '/jobs', component: () => import('../views/Jobs.vue'), meta: { requiresAuth: true } },
   { path: '/settings', component: () => import('../views/Settings.vue'), meta: { requiresAuth: true } },
 ]

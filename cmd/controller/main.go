@@ -23,6 +23,7 @@ import (
 	"github.com/sylphre/MiryMesh/internal/datanode"
 	"github.com/sylphre/MiryMesh/internal/placement"
 	"github.com/sylphre/MiryMesh/internal/s3api"
+	"github.com/sylphre/MiryMesh/internal/users"
 )
 
 func main() {
@@ -220,9 +221,26 @@ func main() {
 			}
 		}
 	}
+	// S3 users: persisted in the DB when one is attached, memory-only otherwise.
+	userMgr := users.NewManager()
+	if sdb, ok := setupStore.(*admin.SetupStoreDB); ok {
+		if dbConn, dbErr := sdb.DB(); dbErr == nil {
+			kr, krErr := sdb.Keyring()
+			if krErr != nil {
+				fmt.Fprintf(os.Stderr, "controller: users: master key: %v\n", krErr)
+				os.Exit(1)
+			}
+			userMgr = users.NewDBManager(dbConn, sdb.Driver(), kr)
+			if loadErr := userMgr.Load(); loadErr != nil {
+				fmt.Fprintf(os.Stderr, "controller: users: %v\n", loadErr)
+				os.Exit(1)
+			}
+		}
+	}
 	s3Router := s3api.NewRouterWithPlacement(store, cfg.Server.Region, resolver)
 	adminHandler := admin.NewWithSetup(reg, store, resolver, jobsStore, internalToken, setupStore, authStore)
 	adminHandler.SetDBConfig(cfg.DB.Driver, cfg.DB.DSN)
+	adminHandler.SetUserManager(userMgr)
 	s3api.SetMetricsRecorder(func(isGet bool, bytes int64) {
 		if isGet {
 			adminHandler.Metrics().RecordGet(bytes)
@@ -233,7 +251,7 @@ func main() {
 
 	staticDir := resolveStaticDir()
 	// Gin engines
-	s3Engine := newS3Engine(s3Router, authStore, cfg, reg, internalToken, setupStore)
+	s3Engine := newS3Engine(s3Router, authStore, userMgr, cfg, reg, internalToken, setupStore)
 	adminEngine := newAdminEngine(adminHandler, setupStore, staticDir, cfg, reg, internalToken)
 	_ = s3Engine
 	_ = adminEngine

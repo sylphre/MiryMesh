@@ -6,6 +6,7 @@ package admin
 import (
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -64,6 +65,10 @@ func (h *Handler) handleBucketSub(w http.ResponseWriter, r *http.Request) {
 			if err := h.storage.DeleteBucket(bucket); err != nil {
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
+			}
+			// Grants must not outlive the bucket: a bucket re-created under the same name starts clean.
+			if err := h.userMgr.RemoveBucket(bucket); err != nil {
+				slog.Warn("admin: remove user grants of deleted bucket", "bucket", bucket, "err", err)
 			}
 			w.WriteHeader(http.StatusNoContent)
 			return

@@ -17,7 +17,7 @@ import (
 // xmlErrorDoc is the minimal S3 XML error envelope; reuse APIError encoding.
 
 func (rt *Router) handleListBuckets(w http.ResponseWriter, r *http.Request) {
-	buckets := rt.store.ListBuckets()
+	buckets := filterBuckets(r, rt.store.ListBuckets())
 	type bucketXML struct {
 		Name         string `xml:"Name"`
 		CreationDate string `xml:"CreationDate"`

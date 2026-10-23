@@ -18,15 +18,22 @@ func (rt *Router) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 // uploads, replaces r.Body with the decoded payload. It returns nil when the
 // request may proceed.
 func AuthenticateRequest(r *http.Request, lookup func(string) (string, bool)) *APIError {
+	_, apiErr := AuthenticateRequestAK(r, lookup)
+	return apiErr
+}
+
+// AuthenticateRequestAK is AuthenticateRequest that also returns the access key the
+// request was signed with, so the caller can authorize it.
+func AuthenticateRequestAK(r *http.Request, lookup func(string) (string, bool)) (string, *APIError) {
 	res, err := sigv4.Verify(r, lookup)
 	if err != nil {
 		e := errAccessDenied
 		if isSignatureError(err) {
 			e = errSignatureMismatch
 		}
-		return &e
+		return "", &e
 	}
-	return prepareStreamingBody(r, res)
+	return res.AccessKey, prepareStreamingBody(r, res)
 }
 
 // VerifyRequest checks SigV4 for Gin middleware.
