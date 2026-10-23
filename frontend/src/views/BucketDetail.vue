@@ -427,7 +427,30 @@ const preview = computed(() => {
 
 const isPublic = computed(() => access.value !== 'private')
 // Public URL は Public Read が許可されているバケットだけに出す。
-const isPublicRead = computed(() => access.value === 'public-read' || access.value === 'public-read-write')
+// 画面上の選択ではなく保存済みの Policy で判定するので、Custom の Policy でも対象になる。
+const isPublicRead = ref(false)
+
+function policyGrantsPublicRead(text) {
+  if (!text || text.trim() === '') return false
+  try {
+    const doc = JSON.parse(text)
+    const raw = doc && doc.Statement
+    const stmts = Array.isArray(raw) ? raw : raw ? [raw] : []
+    const list = (v) => (Array.isArray(v) ? v : v == null ? [] : [v])
+    return stmts.some((s) => {
+      if (!s || s.Effect !== 'Allow') return false
+      if (s.Condition && Object.keys(s.Condition).length > 0) return false
+      const principals = s.Principal && typeof s.Principal === 'object' && !Array.isArray(s.Principal) ? list(s.Principal.AWS) : list(s.Principal)
+      if (!principals.includes('*')) return false
+      return list(s.Action).some((a) => {
+        const v = String(a).toLowerCase()
+        return v === '*' || v === 's3:*' || v === 's3:getobject' || v === 's3:get*'
+      })
+    })
+  } catch {
+    return false
+  }
+}
 
 watch(access, (v) => {
   if (v === 'custom' && !policyText.value.trim()) {
@@ -443,10 +466,12 @@ async function loadAccess() {
     const text = await res.text()
     policyText.value = pretty(text)
     access.value = detectAccess(text)
+    isPublicRead.value = policyGrantsPublicRead(text)
   } catch (e) {
     if (e.status === 404) {
       policyText.value = ''
       access.value = 'private'
+      isPublicRead.value = false
     } else {
       accessError.value = e.message
     }
@@ -468,6 +493,7 @@ async function saveAccess() {
         if (e.status !== 404) throw e
       }
       policyText.value = ''
+      isPublicRead.value = false
     } else if (access.value === 'custom') {
       try {
         JSON.parse(policyText.value)
@@ -475,10 +501,12 @@ async function saveAccess() {
         throw new Error('Policy が正しい JSON ではありません')
       }
       await api(url, { method: 'PUT', body: policyText.value })
+      isPublicRead.value = policyGrantsPublicRead(policyText.value)
     } else {
       const text = JSON.stringify(presetPolicy(access.value, bucket.value), null, 2)
       await api(url, { method: 'PUT', body: text })
       policyText.value = text
+      isPublicRead.value = policyGrantsPublicRead(text)
     }
     toastOk('アクセス設定を保存しました')
   } catch (e) {
