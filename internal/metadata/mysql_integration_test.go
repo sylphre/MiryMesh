@@ -4,6 +4,8 @@
 package metadata_test
 
 import (
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,11 +27,22 @@ func TestMigrateMySQL(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&applied); err != nil {
 		t.Fatal(err)
 	}
-	if applied != 3 {
-		t.Fatalf("schema_migrations rows=%d want 3", applied)
+	// Expected count = number of MySQL migration files, so adding a migration needs no test edit.
+	entries, rerr := os.ReadDir("migrations/mysql")
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	want := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			want++
+		}
+	}
+	if applied != want {
+		t.Fatalf("schema_migrations rows=%d want %d", applied, want)
 	}
 
-	for _, table := range []string{"setup", "sessions", "pair_tokens", "buckets", "objects", "placement", "s3_subresources"} {
+	for _, table := range []string{"setup", "sessions", "pair_tokens", "buckets", "objects", "placement", "s3_subresources", "users", "user_bucket_perms"} {
 		var n int
 		err := db.QueryRow(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?`, table).Scan(&n)
 		if err != nil || n != 1 {
