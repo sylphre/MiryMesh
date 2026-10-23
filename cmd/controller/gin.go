@@ -50,6 +50,8 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 	adminG.DELETE("/buckets/:bucket/s3-policy", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.GET("/buckets/:bucket/quota", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.PUT("/buckets/:bucket/quota", ginWrapAuth(h, h.HandleBucketSub))
+	adminG.GET("/buckets/:bucket/domains", ginWrapAuth(h, h.HandleBucketSub))
+	adminG.PUT("/buckets/:bucket/domains", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.GET("/buckets/:bucket/objects", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.GET("/buckets/:bucket/object", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.PUT("/buckets/:bucket/object", ginWrapAuth(h, h.HandleBucketSub))
@@ -201,6 +203,8 @@ func newS3Engine(router *s3api.Router, authStore *auth.Store, userMgr *users.Man
 		c.String(404, "admin API lives on admin port — use that port with X-Admin-Token")
 	})
 	// S3 catch-all with SigV4 middleware — must not conflict with /internal/* static routes
+	r.Use(s3HostGuard(router.BackingStore()))
+	r.Use(s3AnonymousRead(router.BackingStore()))
 	r.Use(s3AuthMiddleware(authStore, userMgr))
 	r.NoRoute(func(c *gin.Context) {
 		// Gin's /*path conflicts with /internal/* static routes, so S3 catch-all is via NoRoute
@@ -246,6 +250,10 @@ func (w *ginResponseWriter) WriteHeader(code int) {
 func s3AuthMiddleware(store *auth.Store, userMgr *users.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.URL.Path == "/healthz" || c.Request.URL.Path == "/health" {
+			c.Next()
+			return
+		}
+		if _, anon := c.Get(anonReadKey); anon {
 			c.Next()
 			return
 		}

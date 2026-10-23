@@ -88,6 +88,10 @@ func (h *Handler) handleBucketSub(w http.ResponseWriter, r *http.Request) {
 		h.handleBucketQuota(w, r, bucket)
 		return
 	}
+	if parts[1] == "domains" {
+		h.handleBucketDomains(w, r, bucket)
+		return
+	}
 	if parts[1] == "objects" {
 		h.handleBucketObjects(w, r, bucket)
 		return

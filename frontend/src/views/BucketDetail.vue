@@ -426,6 +426,8 @@ const preview = computed(() => {
 })
 
 const isPublic = computed(() => access.value !== 'private')
+// Public URL は Public Read が許可されているバケットだけに出す。
+const isPublicRead = computed(() => access.value === 'public-read' || access.value === 'public-read-write')
 
 watch(access, (v) => {
   if (v === 'custom' && !policyText.value.trim()) {
@@ -614,6 +616,64 @@ async function saveQuota() {
   }
 }
 
+/* ───────────── Domains / Public URL ───────────── */
+
+const domainList = ref([])
+const domainsText = ref('')
+const domainsMax = ref(10)
+const domainsLoading = ref(true)
+const domainsSaving = ref(false)
+const domainsError = ref('')
+
+function applyDomains(j) {
+  domainList.value = Array.isArray(j.domains) ? j.domains : []
+  domainsText.value = domainList.value.join('\n')
+  if (Number.isFinite(j.max)) domainsMax.value = j.max
+}
+
+async function loadDomains() {
+  domainsLoading.value = true
+  domainsError.value = ''
+  try {
+    applyDomains(await api(`/api/admin/buckets/${encBucket.value}/domains`))
+  } catch (e) {
+    domainsError.value = e.message
+  } finally {
+    domainsLoading.value = false
+  }
+}
+
+async function saveDomains() {
+  if (domainsSaving.value) return
+  const list = domainsText.value
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (list.length > domainsMax.value) {
+    domainsError.value = `ドメインは最大 ${domainsMax.value} 個までです`
+    return
+  }
+  domainsSaving.value = true
+  domainsError.value = ''
+  try {
+    const j = await api(`/api/admin/buckets/${encBucket.value}/domains`, { method: 'PUT', body: { domains: list } })
+    applyDomains(j)
+    toastOk(domainList.value.length === 0 ? 'ドメイン制限を解除しました' : 'ドメインを保存しました')
+  } catch (e) {
+    domainsError.value = e.message
+  } finally {
+    domainsSaving.value = false
+  }
+}
+
+// ドメインが設定済みなら先頭のドメイン（https）、未設定ならこの画面と同じホストの S3 ポート(9000)。
+function publicUrl(entry) {
+  const key = String(entry.key).split('/').map(encodeURIComponent).join('/')
+  const first = domainList.value[0]
+  const base = first ? `https://${first}` : `${window.location.protocol}//${window.location.hostname}:9000`
+  return `${base}/${encBucket.value}/${key}`
+}
+
 /* ───────────── Bucket ───────────── */
 
 async function deleteBucket() {
@@ -642,6 +702,7 @@ function loadAll() {
   loadAccess()
   loadPlacement()
   loadQuota()
+  loadDomains()
 }
 
 onMounted(loadAll)
@@ -780,6 +841,9 @@ const advancedItems = [
                   <button v-if="e.type === 'file'" type="button" class="icon-btn" :aria-label="`${e.name} をダウンロード`" @click="download(e)">
                     <Icon name="download" :size="16" />
                   </button>
+                  <a v-if="e.type === 'file' && isPublicRead" class="icon-btn" :href="publicUrl(e)" target="_blank" rel="noopener noreferrer" :aria-label="`${e.name} の Public URL を開く`" :title="publicUrl(e)">
+                    <Icon name="external" :size="16" />
+                  </a>
                   <button type="button" class="icon-btn icon-btn--danger" :aria-label="`${e.name} を削除`" @click="removeEntry(e)">
                     <Icon name="trash" :size="16" />
                   </button>
@@ -838,6 +902,27 @@ const advancedItems = [
         <div class="row">
           <button type="submit" class="btn btn--primary" :disabled="accessSaving">
             <span v-if="accessSaving" class="spinner" aria-hidden="true"></span>保存
+          </button>
+        </div>
+      </form>
+
+      <form class="card__body stack" aria-labelledby="domains-title" @submit.prevent="saveDomains">
+        <h3 id="domains-title" style="margin: 0; font-size: 1rem">許可するドメイン</h3>
+        <p class="muted small">
+          設定すると、このバケットへのリクエストは Host ヘッダーがここに書いたドメイン（またはそのサブドメイン）のときだけ受け付けます。
+          空にすると制限しません。最大 {{ domainsMax }} 個。NGINX では <code>proxy_set_header Host $host;</code> が必要です。
+        </p>
+        <div v-if="domainsError" class="alert alert--error" role="alert">
+          <Icon name="alert" /><div class="alert__body">{{ domainsError }}</div>
+        </div>
+        <div v-if="domainsLoading" class="skeleton" style="height: 80px" aria-busy="true"></div>
+        <label v-else class="field">
+          <span class="field__label">ドメイン（1 行に 1 つ）</span>
+          <textarea v-model="domainsText" class="input input--mono" rows="5" spellcheck="false" placeholder="files.example.com&#10;cdn.example.org"></textarea>
+        </label>
+        <div class="row">
+          <button type="submit" class="btn btn--primary" :disabled="domainsSaving || domainsLoading">
+            <span v-if="domainsSaving" class="spinner" aria-hidden="true"></span>保存
           </button>
         </div>
       </form>
