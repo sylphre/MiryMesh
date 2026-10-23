@@ -233,7 +233,7 @@ func main() {
 
 	staticDir := resolveStaticDir()
 	// Gin engines
-	s3Engine := newS3Engine(s3Router, authStore, cfg, reg, internalToken)
+	s3Engine := newS3Engine(s3Router, authStore, cfg, reg, internalToken, setupStore)
 	adminEngine := newAdminEngine(adminHandler, setupStore, staticDir, cfg, reg, internalToken)
 	_ = s3Engine
 	_ = adminEngine

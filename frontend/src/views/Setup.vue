@@ -1,21 +1,33 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <!-- Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. -->
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import BrandMark from '../components/BrandMark.vue'
+import Icon from '../components/Icon.vue'
 import { useClusterStore } from '../stores/cluster'
+import { api, getToken, setToken } from '../lib/api.js'
+import { toastOk } from '../lib/toast.js'
 
 const router = useRouter()
+const store = useClusterStore()
+
+const loading = ref(true)
+const busy = ref(false)
+const error = ref('')
+const notice = ref('')
+
+// 1: Admin 作成 / 2: ログイン / 3: S3 · DB · Storage
+const step = ref(1)
 const dbConfigured = ref(false)
 const mode = ref('standalone')
 const hasDatanode = ref(false)
-const step = ref(1)
-const status = ref('読み込み中…')
-const statusClass = ref('state--loading')
+
 const adminUser = ref('')
 const adminPass = ref('')
 const accessKey = ref('')
 const secretKey = ref('')
+const showSecret = ref(false)
 const region = ref('us-east-1')
 const gateway = ref(false)
 const defaultPolicy = ref('single')
@@ -25,116 +37,135 @@ const datanodePaths = ref('')
 
 const isGateway = computed(() => mode.value === 'gateway')
 
+const stepLabels = ['Admin 作成', 'ログイン', 'S3 / DB / Storage']
+
+const policies = [
+  { value: 'single', title: 'single', desc: '1 ノードに保存' },
+  { value: 'dual', title: 'dual', desc: '2 ノードに複製' },
+  { value: 'triple', title: 'triple', desc: '3 ノードに複製' },
+  { value: 'ALL', title: 'ALL', desc: '全ノードに複製' },
+]
+
+const drivers = [
+  { value: '', title: 'auto', desc: '自動判定' },
+  { value: 'postgres', title: 'postgres', desc: 'PostgreSQL' },
+  { value: 'mysql', title: 'mysql', desc: 'MySQL / MariaDB' },
+  { value: 'sqlite', title: 'sqlite', desc: '開発用' },
+]
+
+function fail(e) {
+  error.value = e && e.message ? e.message : String(e)
+}
+
+async function loadCluster() {
+  try {
+    const cj = await api('/api/admin/cluster', { redirectOn401: false })
+    hasDatanode.value = !!((cj.nodes && cj.nodes.length > 0) || (cj.disks && cj.disks.length > 0))
+  } catch {
+    hasDatanode.value = false
+  }
+}
+
 onMounted(async () => {
   try {
-    const token = localStorage.getItem('mirymesh_admin_token') || ''
-    const headers = token ? { 'X-Admin-Token': token } : {}
-    const res = await fetch('/api/admin/config', { headers })
-    const j = await res.json()
-    dbConfigured.value = !!j.db_configured
-    mode.value = j.mode || 'standalone'
-    gateway.value = j.mode === 'gateway'
-    // Check hasDatanode via cluster
-    if (token) {
-      try {
-        const cr = await fetch('/api/admin/cluster', { headers })
-        if (cr.ok) {
-          const cj = await cr.json()
-          hasDatanode.value = (cj.nodes && cj.nodes.length > 0) || (cj.disks && cj.disks.length > 0)
-        }
-      } catch {}
+    try {
+      const cfg = await api('/api/admin/config', { redirectOn401: false })
+      dbConfigured.value = !!cfg.db_configured
+      mode.value = cfg.mode || 'standalone'
+      gateway.value = cfg.mode === 'gateway'
+    } catch {
+      // 初期化済みで未ログインの場合は 401 になる。状態判定は下の status で行う。
     }
-    // Check initialized
-    const sr = await fetch('/api/admin/setup/status')
-    const sj = await sr.json()
-    if (sj.initialized) {
-      status.value = '既に初期化済みです。ログインしてください。'
+    if (getToken()) await loadCluster()
+
+    const st = await api('/api/admin/setup/status', { auth: false })
+    if (st.initialized) {
+      notice.value = '既に初期化済みです。ログインして設定を続けてください。'
       step.value = 2
     } else {
-      status.value = ''
       step.value = 1
     }
   } catch (e) {
-    status.value = '状態取得に失敗: ' + e.message
-    statusClass.value = 'state--error'
+    error.value = '状態の取得に失敗しました: ' + (e.message || e)
+  } finally {
+    loading.value = false
   }
 })
 
-async function submitStep1(e) {
-  e.preventDefault()
+async function submitStep1() {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
   try {
-    const res = await fetch('/api/admin/setup', {
+    const j = await api('/api/admin/setup', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: adminUser.value, password: adminPass.value }),
+      body: { username: adminUser.value, password: adminPass.value },
+      auth: false,
     })
-    if (!res.ok) throw new Error(await res.text())
-    const j = await res.json()
-    localStorage.setItem('mirymesh_admin_token', j.admin_token)
-    status.value = 'Admin 作成完了。ログインしてください。'
-    statusClass.value = 'state--success'
+    if (j && j.admin_token) setToken(j.admin_token)
+    notice.value = 'Admin を作成しました。ログインしてください。'
     step.value = 2
-  } catch (err) {
-    status.value = '失敗: ' + err.message
-    statusClass.value = 'state--error'
+  } catch (e) {
+    fail(e)
+  } finally {
+    busy.value = false
   }
 }
 
-async function submitLogin(e) {
-  e.preventDefault()
+async function submitLogin() {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
   try {
-    const res = await fetch('/api/admin/login', {
+    const j = await api('/api/admin/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: adminUser.value, password: adminPass.value }),
+      body: { username: adminUser.value, password: adminPass.value },
+      auth: false,
     })
-    if (!res.ok) throw new Error(await res.text())
-    const j = await res.json()
-    localStorage.setItem('mirymesh_admin_token', j.admin_token)
-    // Re-check config for hasDatanode
-    try {
-      const headers = { 'X-Admin-Token': j.admin_token }
-      const cr = await fetch('/api/admin/cluster', { headers })
-      if (cr.ok) {
-        const cj = await cr.json()
-        hasDatanode.value = (cj.nodes && cj.nodes.length > 0)
-      }
-    } catch {}
+    setToken(j.admin_token)
+    await loadCluster()
+    notice.value = ''
     step.value = 3
-    status.value = 'ログイン成功'
-    statusClass.value = 'state--success'
-  } catch (err) {
-    status.value = 'ログイン失敗: ' + err.message
-    statusClass.value = 'state--error'
+  } catch (e) {
+    error.value = e.status === 401 || e.status === 403 ? 'ユーザー名またはパスワードが正しくありません' : e.message
+  } finally {
+    busy.value = false
   }
+}
+
+function randomString(len, alphabet) {
+  const a = new Uint8Array(len)
+  crypto.getRandomValues(a)
+  return Array.from(a, (b) => alphabet[b % alphabet.length]).join('')
 }
 
 async function genCreds() {
-  const token = localStorage.getItem('mirymesh_admin_token') || ''
+  error.value = ''
   try {
-    const r = await fetch('/api/admin/generate-credentials', { method: 'POST', headers: { 'X-Admin-Token': token } })
-    if (r.ok) {
-      const j = await r.json()
-      if (j.access_key) accessKey.value = j.access_key
-      if (j.secret_key) secretKey.value = j.secret_key
-      return
-    }
-  } catch {}
-  if (!accessKey.value) {
-    const a = new Uint8Array(20)
-    crypto.getRandomValues(a)
-    accessKey.value = Array.from(a, b => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[b % 36]).join('').slice(0, 20)
+    const j = await api('/api/admin/generate-credentials', { method: 'POST', redirectOn401: false })
+    if (j && j.access_key) accessKey.value = j.access_key
+    if (j && j.secret_key) secretKey.value = j.secret_key
+    showSecret.value = true
+    return
+  } catch {
+    // サーバー側で生成できない場合はブラウザの CSPRNG で生成する
   }
-  if (!secretKey.value) {
-    const s = new Uint8Array(16)
-    crypto.getRandomValues(s)
-    secretKey.value = Array.from(s, b => ('0' + b.toString(16)).slice(-2)).join('').slice(0, 32)
+  accessKey.value = randomString(20, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')
+  secretKey.value = randomString(40, 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
+  showSecret.value = true
+}
+
+async function copy(text) {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    toastOk('コピーしました')
+  } catch {
+    error.value = 'クリップボードにコピーできませんでした'
   }
 }
 
-async function submitStep2(e) {
-  e.preventDefault()
-  const token = localStorage.getItem('mirymesh_admin_token') || ''
+async function saveConfig() {
   const payload = {
     access_key: accessKey.value,
     secret_key: secretKey.value,
@@ -146,136 +177,217 @@ async function submitStep2(e) {
     db_dsn: dbDsn.value,
   }
   try {
-    // Gateway with 0 nodes: policy validation is skipped server-side
-    const res = await fetch('/api/admin/setup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token },
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok) {
-      const text = await res.text()
-      // If setup update failed due to policy, try policy-only update (gateway skips validation)
-      if (text.includes('requires') && text.includes('nodes')) {
-        // Gateway: policy with 0 nodes should succeed — retry without S3 keys
-        const r2 = await fetch('/api/admin/setup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token },
-          body: JSON.stringify({ default_policy: defaultPolicy.value, gateway: gateway.value }),
-        })
-        if (!r2.ok) throw new Error(await r2.text())
-      } else {
-        throw new Error(text)
-      }
+    await api('/api/admin/setup', { method: 'POST', body: payload })
+  } catch (e) {
+    // Gateway で DataNode が 0 台の場合はポリシー検証で弾かれるため、ポリシーのみで再試行する
+    const text = e && e.message ? e.message : ''
+    if (text.includes('requires') && text.includes('nodes')) {
+      await api('/api/admin/setup', {
+        method: 'POST',
+        body: { default_policy: defaultPolicy.value, gateway: gateway.value },
+      })
+    } else {
+      throw e
     }
-    step.value = 4
-    status.value = '完了しました'
-    statusClass.value = 'state--success'
-    const store = useClusterStore()
-    store.initialized = true
-    await router.push('/')
-  } catch (err) {
-    status.value = '保存失敗: ' + err.message
-    statusClass.value = 'state--error'
+  }
+  store.initialized = true
+  toastOk('セットアップが完了しました')
+  await router.push('/')
+}
+
+async function submitStep3() {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    await saveConfig()
+  } catch (e) {
+    error.value = '保存に失敗しました: ' + (e.message || e)
+  } finally {
+    busy.value = false
   }
 }
 
 async function skipS3Keys() {
   accessKey.value = ''
   secretKey.value = ''
-  await submitStep2(new Event('submit'))
-}
-
-async function goDash() {
-  const store = useClusterStore()
-  store.initialized = true
-  await store.fetchConfig()
-  await router.push('/')
+  await submitStep3()
 }
 </script>
 
 <template>
-  <main class="container container--narrow">
-    <div class="card" id="setup-card">
-      <h2>初期設定</h2>
-      <p class="caption" style="margin-top: 4px;">Admin 作成 → ログイン → S3 / DB / Storage の2段階で完了します。</p>
-      <div class="stepper" style="margin-top: 16px;">
-        <div :class="step >= 1 ? (step > 1 ? 'stepper__step stepper__step--done' : 'stepper__step stepper__step--active') : 'stepper__step'"></div>
-        <div :class="step === 2 ? 'stepper__step stepper__step--active' : step > 2 ? 'stepper__step stepper__step--done' : 'stepper__step'"></div>
-        <div :class="step === 3 ? 'stepper__step stepper__step--active' : step > 3 ? 'stepper__step stepper__step--done' : 'stepper__step'"></div>
+  <div class="auth">
+    <div class="auth__card" style="max-width: 600px; width: 100%">
+      <div class="auth__brand">
+        <BrandMark :size="36" />
+        <div>
+          <div class="brand__name">MiryMesh</div>
+          <div class="brand__sub">Initial Setup</div>
+        </div>
       </div>
-      <p :class="statusClass" v-if="status" style="margin-top: 12px;">{{ status }}</p>
+
+      <h1 class="auth__title">初期設定</h1>
+      <p class="muted small mt-1">Admin 作成 → ログイン → S3 / DB / Storage の順に設定します。</p>
+
+      <ol class="steps mt-2" style="list-style: none; padding: 0; margin-bottom: 0" aria-label="進行状況">
+        <template v-for="(label, i) in stepLabels" :key="label">
+          <li class="step" :class="{ 'step--on': step >= i + 1 }" :aria-current="step === i + 1 ? 'step' : undefined">
+            <span class="step__num">
+              <Icon v-if="step > i + 1" name="check" :size="14" />
+              <template v-else>{{ i + 1 }}</template>
+            </span>
+            <span>{{ label }}</span>
+          </li>
+          <li v-if="i < stepLabels.length - 1" class="step__bar" aria-hidden="true"></li>
+        </template>
+      </ol>
+
+      <div v-if="error" class="alert alert--error mt-3" role="alert">
+        <Icon name="alert" />
+        <div class="alert__body">{{ error }}</div>
+      </div>
+      <p v-else-if="notice" class="muted small mt-3" role="status">{{ notice }}</p>
+
+      <p v-if="loading" class="muted mt-3">読み込み中…</p>
 
       <!-- Step 1: Admin -->
-      <form v-if="step === 1" @submit="submitStep1" class="form form--stack" style="margin-top: 16px;">
-        <h3>Step 1 — Admin アカウント作成</h3>
-        <label>Admin Username <input v-model="adminUser" class="input" required minlength="3" placeholder="admin" /></label>
-        <label>Admin Password <input v-model="adminPass" class="input" type="password" required minlength="8" placeholder="8文字以上" /></label>
-        <button type="submit" class="btn btn--primary">作成して次へ</button>
+      <form v-else-if="step === 1" class="stack mt-3" @submit.prevent="submitStep1">
+        <h2 class="card__title">Admin アカウント作成</h2>
+        <label class="field">
+          <span class="field__label">Username</span>
+          <input v-model="adminUser" class="input" required minlength="3" autocomplete="username" autofocus placeholder="admin" />
+        </label>
+        <label class="field">
+          <span class="field__label">Password</span>
+          <input v-model="adminPass" type="password" class="input" required minlength="8" autocomplete="new-password" placeholder="8 文字以上" />
+        </label>
+        <button type="submit" class="btn btn--primary btn--block" :disabled="busy">
+          <span v-if="busy" class="spinner" aria-hidden="true"></span>
+          作成して次へ
+        </button>
       </form>
 
       <!-- Step 2: Login -->
-      <form v-if="step === 2" @submit="submitLogin" class="form form--stack" style="margin-top: 16px;">
-        <h3>ログイン</h3>
-        <p class="caption">Step 1 で作成したユーザーでログインしてください。</p>
-        <label>Username <input v-model="adminUser" class="input" required /></label>
-        <label>Password <input v-model="adminPass" class="input" type="password" required /></label>
-        <button type="submit" class="btn btn--primary">ログイン</button>
+      <form v-else-if="step === 2" class="stack mt-3" @submit.prevent="submitLogin">
+        <h2 class="card__title">ログイン</h2>
+        <label class="field">
+          <span class="field__label">Username</span>
+          <input v-model="adminUser" class="input" required autocomplete="username" autofocus />
+        </label>
+        <label class="field">
+          <span class="field__label">Password</span>
+          <input v-model="adminPass" type="password" class="input" required autocomplete="current-password" />
+        </label>
+        <button type="submit" class="btn btn--primary btn--block" :disabled="busy">
+          <span v-if="busy" class="spinner" aria-hidden="true"></span>
+          ログイン
+        </button>
       </form>
 
       <!-- Step 3: S3 / DB / Storage -->
-      <form v-if="step === 3" @submit="submitStep2" class="form form--stack" style="margin-top: 16px;">
-        <h3>Step 2 — S3 / DB / Storage</h3>
-        <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end;">
-          <label>AccessKey <input v-model="accessKey" class="input" placeholder="TESTKEY" /></label>
-          <button type="button" class="btn btn--sm" @click="genCreds" style="height: 40px;">生成</button>
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end;">
-          <label>SecretKey <input v-model="secretKey" class="input" type="password" placeholder="8文字以上" /></label>
-          <button type="button" class="btn btn--sm" @click="genCreds" style="height: 40px;">生成</button>
-        </div>
-        <p v-if="isGateway && !hasDatanode" class="caption" style="color: var(--color-warning);">Gateway で DataNode 未登録のため S3 Keys は後で作成できます。「スキップして完了」で進んでください。</p>
-        <div class="grid grid--2" style="margin-top: 0;">
-          <label>Region <input v-model="region" class="input" placeholder="us-east-1" /></label>
-          <label>Gateway
-            <select v-model="gateway" class="input" :disabled="isGateway">
-              <option :value="false">standalone</option><option :value="true">gateway</option>
-            </select>
-            <span v-if="isGateway" class="caption">Gateway mode (from install.sh) — disabled</span>
+      <form v-else class="stack stack--lg mt-3" @submit.prevent="submitStep3">
+        <section class="stack">
+          <h2 class="card__title">S3 認証情報</h2>
+          <p v-if="isGateway && !hasDatanode" class="muted small">
+            Gateway で DataNode が未登録のため、S3 Keys は後から作成できます。「スキップして完了」で進んでください。
+          </p>
+          <label class="field">
+            <span class="field__label">Access Key</span>
+            <span class="input-group">
+              <input v-model="accessKey" class="input input--mono" autocomplete="off" spellcheck="false" placeholder="未入力なら後で作成" />
+              <button type="button" class="icon-btn" aria-label="Access Key をコピー" :disabled="!accessKey" @click="copy(accessKey)">
+                <Icon name="copy" />
+              </button>
+            </span>
           </label>
-        </div>
-        <label>Default Policy
-          <select v-model="defaultPolicy" class="input">
-            <option value="single">single</option>
-            <option value="dual">dual</option>
-            <option value="triple">triple</option>
-            <option value="ALL">ALL</option>
-          </select>
-        </label>
-        <!-- DB fields: v-if で DOM 除去 — dbConfiguredなら非表示、GatewayならDatanode Pathsも非表示 -->
-        <template v-if="!dbConfigured">
-          <div :class="isGateway ? '' : 'grid grid--2'" style="margin-top: 0;">
-            <label>DB Driver <select v-model="dbDriver" class="input" required :style="isGateway ? 'max-width: 320px;' : ''"><option value="">auto</option><option value="postgres">postgres</option><option value="mysql">mysql</option><option value="sqlite">sqlite</option></select></label>
-            <label v-if="!isGateway">Datanode Paths <input v-model="datanodePaths" class="input" placeholder="/mnt/disk1,/mnt/disk2" required /></label>
-          </div>
+          <label class="field">
+            <span class="field__label">Secret Key</span>
+            <span class="input-group">
+              <input
+                v-model="secretKey"
+                :type="showSecret ? 'text' : 'password'"
+                class="input input--mono"
+                autocomplete="new-password"
+                spellcheck="false"
+                placeholder="8 文字以上"
+              />
+              <button type="button" class="btn" @click="showSecret = !showSecret">{{ showSecret ? '隠す' : '表示' }}</button>
+              <button type="button" class="icon-btn" aria-label="Secret Key をコピー" :disabled="!secretKey" @click="copy(secretKey)">
+                <Icon name="copy" />
+              </button>
+            </span>
+          </label>
           <div>
-            <label>DB DSN <input v-model="dbDsn" class="input" placeholder="postgres://..." required /></label>
+            <button type="button" class="btn btn--sm" @click="genCreds"><Icon name="key" :size="14" />自動生成</button>
           </div>
-        </template>
-        <template v-else-if="!isGateway">
-          <div>
-            <label>Datanode Paths <input v-model="datanodePaths" class="input" placeholder="/mnt/disk1,/mnt/disk2" /></label>
+        </section>
+
+        <section class="stack">
+          <h2 class="card__title">Storage</h2>
+          <div class="grid grid--2">
+            <label class="field">
+              <span class="field__label">Region</span>
+              <input v-model="region" class="input" placeholder="us-east-1" />
+            </label>
+            <label class="field">
+              <span class="field__label">Mode</span>
+              <select v-model="gateway" class="input" :disabled="isGateway">
+                <option :value="false">standalone</option>
+                <option :value="true">gateway</option>
+              </select>
+              <span v-if="isGateway" class="muted small">install.sh で Gateway が指定されています</span>
+            </label>
           </div>
-        </template>
-        <div style="display: flex; gap: 8px;">
-          <button type="submit" class="btn btn--primary">保存して完了</button>
-          <button type="button" class="btn" @click="skipS3Keys">スキップして完了</button>
+
+          <fieldset class="field" style="border: 0; padding: 0; margin: 0; min-width: 0">
+            <legend class="field__label">Default Policy</legend>
+            <div class="choices">
+              <label v-for="p in policies" :key="p.value" class="choice" :class="{ 'choice--on': defaultPolicy === p.value }">
+                <input v-model="defaultPolicy" type="radio" name="default-policy" :value="p.value" />
+                <span class="choice__title">{{ p.title }}</span>
+                <span class="choice__desc">{{ p.desc }}</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <label v-if="!isGateway" class="field">
+            <span class="field__label">Datanode Paths</span>
+            <input
+              v-model="datanodePaths"
+              class="input input--mono"
+              placeholder="/mnt/disk1,/mnt/disk2"
+              :required="!dbConfigured"
+            />
+            <span class="muted small">カンマ区切りで複数指定できます</span>
+          </label>
+        </section>
+
+        <section v-if="!dbConfigured" class="stack">
+          <h2 class="card__title">Database</h2>
+          <fieldset class="field" style="border: 0; padding: 0; margin: 0; min-width: 0">
+            <legend class="field__label">Driver</legend>
+            <div class="choices">
+              <label v-for="d in drivers" :key="d.title" class="choice" :class="{ 'choice--on': dbDriver === d.value }">
+                <input v-model="dbDriver" type="radio" name="db-driver" :value="d.value" />
+                <span class="choice__title">{{ d.title }}</span>
+                <span class="choice__desc">{{ d.desc }}</span>
+              </label>
+            </div>
+          </fieldset>
+          <label class="field">
+            <span class="field__label">DSN</span>
+            <input v-model="dbDsn" class="input input--mono" required spellcheck="false" placeholder="postgres://user:pass@host:5432/mirymesh" />
+          </label>
+        </section>
+
+        <div class="row">
+          <button type="submit" class="btn btn--primary" :disabled="busy">
+            <span v-if="busy" class="spinner" aria-hidden="true"></span>
+            保存して完了
+          </button>
+          <button type="button" class="btn" :disabled="busy" @click="skipS3Keys">スキップして完了</button>
         </div>
       </form>
-
-      <div v-if="step === 4" style="margin-top: 16px;">
-        <p class="state--success">セットアップが完了しました。ダッシュボードへ進んでください。</p>
-        <p style="margin-top: 16px;"><button class="btn btn--primary" @click="goDash">ダッシュボードへ</button></p>
-      </div>
     </div>
-  </main>
+  </div>
 </template>

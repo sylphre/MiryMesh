@@ -1,11 +1,8 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 /* Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. */
-/* Reset + base typography. No tokens, no components. */
+/* Reset + base typography. No components. */
 
-* {
-  box-sizing: border-box;
-}
-
+*,
 *::before,
 *::after {
   box-sizing: border-box;
@@ -19,91 +16,94 @@ html {
 body {
   margin: 0;
   font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
   color: var(--color-fg);
   background: var(--color-bg);
-  line-height: 1.7;
-  letter-spacing: 0.04em;
-  word-break: keep-all;
   line-break: strict;
   overflow-wrap: break-word;
-  font-feature-settings: "palt" 1, "kern" 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Headings ── */
 h1,
 h2,
-h3 {
+h3,
+h4 {
   font-family: var(--font-display);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
   margin: 0;
 }
 
-h1 {
-  font-size: 28px;
+h1 { font-size: 22px; }
+h2 { font-size: 18px; }
+h3 { font-size: 15px; }
+
+p { margin: 0; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
 }
 
-h2 {
-  font-size: 22px;
-}
-
-h3 {
-  font-size: 16px;
-}
-
-p {
-  margin: 0;
-}
-
-a {
+a:not([class]) {
   color: var(--color-primary);
   text-decoration: none;
 }
 
-a:hover {
+a:not([class]):hover {
   color: var(--color-primary-hover);
+  text-decoration: underline;
 }
 
-a:focus-visible {
-  outline: 2px solid var(--color-primary);
+code,
+pre,
+kbd {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-border-focus);
   outline-offset: 2px;
-  border-radius: var(--radius-xs);
 }
 
-/* ── Small / muted helpers ── */
-small,
-.caption {
-  font-size: 13px;
-  color: var(--color-muted);
-  line-height: 1.5;
+::selection {
+  background: var(--color-primary-soft);
 }
 
-/* ── Tables: opt-in .table ── */
-table {
-  width: 100%;
-  border-collapse: collapse;
+[hidden] {
+  display: none !important; /* author display rules must not defeat the hidden attribute */
 }
 
-.table th,
-.table td {
-  padding: var(--space-sm) var(--space-md);
-  border-bottom: 1px solid var(--color-border);
-  text-align: left;
-  font-size: 14px;
+/* ── Scrollbars ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
 }
 
-.table th {
-  font-weight: 600;
-  color: var(--color-muted);
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
+::-webkit-scrollbar-track { background: transparent; }
 
-.table__head {
-  font-weight: 600;
-  color: var(--color-muted);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important; /* honour the user's motion preference everywhere */
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

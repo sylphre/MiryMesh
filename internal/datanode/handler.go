@@ -36,6 +36,12 @@ type Handler struct {
 	evacDir string
 	// store is the local object store on the DataNode (DataNode only).
 	store interface{}
+	// pairConsume validates and burns a one-time pair token (controller side).
+	pairConsume func(token string) error
+	// adopter handles controller-initiated pairing (DataNode side, opt-in).
+	adopter func(controllerURL, pairToken string) error
+	// nodeTok is the per-node token learned after registration (DataNode side).
+	nodeTok tokenBox
 }
 
 // NewHandler creates a Handler.
@@ -63,6 +69,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/internal/restore", h.handleRestore)
 	// ObjectStore passthrough for gateway mode
 	mux.HandleFunc("/internal/objects/", h.handleObjects)
+	// Controller-initiated pairing (404 unless an adopter is installed)
+	mux.HandleFunc("/internal/adopt", h.handleAdopt)
 }
 
 type registerReq struct {
@@ -81,7 +89,9 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if h.token != "" && req.Token != h.token {
+	authed := h.tokenOK(req.NodeID, req.Token)
+	viaPair := !authed && h.pairConsume != nil && req.Token != ""
+	if !authed && !viaPair {
 		http.Error(w, "invalid token", http.StatusForbidden)
 		return
 	}
@@ -89,12 +99,24 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node_id and addr required", http.StatusBadRequest)
 		return
 	}
+	// A one-time pair token is only burned once the request is known to be well-formed.
+	if viaPair {
+		if err := h.pairConsume(req.Token); err != nil {
+			http.Error(w, "invalid token", http.StatusForbidden)
+			return
+		}
+	}
 	if err := h.registry.RegisterNode(req.NodeID, req.Addr); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	resp := map[string]string{"status": "ok"}
+	if h.token != "" {
+		// Per-node credential for later heartbeat/disk calls and re-registration.
+		resp["node_token"] = NodeToken(h.token, req.NodeID)
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 type heartbeatReq struct {
@@ -112,7 +134,7 @@ func (h *Handler) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if h.token != "" && req.Token != "" && req.Token != h.token {
+	if h.token != "" && req.Token != "" && !h.tokenOK(req.NodeID, req.Token) {
 		http.Error(w, "invalid token", http.StatusForbidden)
 		return
 	}
@@ -144,7 +166,7 @@ func (h *Handler) handleDisks(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if h.token != "" && req.Token != "" && req.Token != h.token {
+		if h.token != "" && req.Token != "" && !h.tokenOK(req.NodeID, req.Token) {
 			http.Error(w, "invalid token", http.StatusForbidden)
 			return
 		}
@@ -286,7 +308,7 @@ func (h *Handler) handleObjects(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "DataNode storage not configured", http.StatusInternalServerError)
 		return
 	}
-	if h.token != "" && r.Header.Get("X-Internal-Token") != h.token && r.URL.Query().Get("token") != h.token {
+	if want := h.objectToken(); want != "" && r.Header.Get("X-Internal-Token") != want && r.URL.Query().Get("token") != want {
 		http.Error(w, "invalid token", http.StatusForbidden)
 		return
 	}

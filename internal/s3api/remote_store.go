@@ -51,7 +51,7 @@ func NewRemoteStoreWithResolver(reg *datanode.Registry, engine *placement.Engine
 		reg:          reg,
 		resolver:     resolver,
 		engine:       engine,
-		client:       &http.Client{Timeout: 30 * time.Second},
+		client:       &http.Client{Timeout: 30 * time.Second, Transport: &nodeTokenTransport{reg: reg, token: token, base: http.DefaultTransport}},
 		token:        token,
 		buckets:      make(map[string]struct{}),
 		bucketPolicy: make(map[string][]byte),

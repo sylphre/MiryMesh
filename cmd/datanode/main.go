@@ -22,9 +22,11 @@ import (
 func main() {
 	var controllerURL, pairToken string
 	var paths multiFlag
+	var allowAdopt bool
 	flag.StringVar(&controllerURL, "controller-url", "", "controller URL (e.g. http://master:9001)")
 	flag.StringVar(&pairToken, "pair-token", "", "one-time pairing token from POST /api/admin/pair-token")
 	flag.Var(&paths, "path", "datanode path (repeatable, e.g. --path /mnt/disk1)")
+	flag.BoolVar(&allowAdopt, "allow-adopt", false, "accept controller-initiated pairing via POST /internal/adopt (only while unpaired; enable on trusted networks only)")
 	flag.Parse()
 	cfgPath := "/etc/mirymesh/config.yaml"
 	if flag.NArg() > 0 {
@@ -86,6 +88,16 @@ func main() {
 	}
 	dnHandler := datanode.NewHandlerWithObjects(reg, token, store)
 	dnHandler.RegisterRoutes(mux)
+	// Persist the controller-issued node token so restarts don't need a new pair token.
+	tokenDir := cfg.Server.DataDir
+	if tokenDir == "" {
+		tokenDir = "/var/lib/mirymesh"
+	}
+	agent.Bind(filepath.Join(tokenDir, "datanode.token"), dnHandler.SetNodeToken)
+	if allowAdopt {
+		dnHandler.SetAdopter(agent.Adopt)
+		slog.Warn("datanode: controller-initiated pairing enabled (/internal/adopt); keep the DataNode port on a trusted network")
+	}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

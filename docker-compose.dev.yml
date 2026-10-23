@@ -22,4 +22,26 @@ services:
     environment: { POSTGRES_USER: mirymesh, POSTGRES_PASSWORD: mirymesh, POSTGRES_DB: mirymesh }
     ports: ["5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
-volumes: { pgdata: {} }
+  # 検証用 DataNode。Setup の Datanode Paths には /data/disk1,/data/disk2 を指定できる。
+  # 9002 は compose 内ネットワークのみで公開しない（ports なし）。
+  # setup 後に controller が再起動して internalToken(=admin_token) が有効になった場合は、
+  #   MIRYMESH_DEV_PAIR_TOKEN=<admin_token> docker compose -f docker-compose.dev.yml up -d --force-recreate datanode
+  # で再登録する。
+  datanode:
+    build:
+      context: .
+      dockerfile: packaging/docker/Dockerfile.dev
+    depends_on: [mirymesh-dev]
+    volumes:
+      - .:/src
+      - dn-disk1:/data/disk1
+      - dn-disk2:/data/disk2
+    command:
+      - go
+      - run
+      - ./cmd/datanode
+      - --controller-url=http://mirymesh-dev:9001
+      - --path=/data/disk1
+      - --path=/data/disk2
+      - --pair-token=${MIRYMESH_DEV_PAIR_TOKEN:-}
+volumes: { pgdata: {}, dn-disk1: {}, dn-disk2: {} }

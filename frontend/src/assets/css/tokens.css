@@ -1,51 +1,19 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 /* Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. */
-/* Tokens only: :root. No resets, no element selectors. */
-/* Visual Theme: black base + near-future infra */
+/* Tokens only: custom properties. No resets, no element selectors. */
+/* Themes: dark (default) / light, switched via <html data-theme="..."> */
 
 :root {
-  /* ── Background ── */
-  --color-bg: #0a0a0a;
-  --color-bg-soft: #141414;
-  --color-surface: #1a1a1a;
-  --color-surface-hover: #222222;
-  --color-surface-raised: #242424;
-
-  /* ── Text ── */
-  --color-fg: #f5f5f7;
-  --color-fg-secondary: rgba(245, 245, 247, 0.72);
-  --color-muted: #8a8a8e;
-  --color-muted-soft: rgba(255, 255, 255, 0.38);
-  --color-disabled: rgba(255, 255, 255, 0.22);
-
-  /* ── Border ── */
-  --color-border: rgba(255, 255, 255, 0.09);
-  --color-border-strong: rgba(255, 255, 255, 0.14);
-  --color-border-focus: #38bdf8;
-
-  /* ── Soft / muted fills ── */
-  --color-soft: rgba(255, 255, 255, 0.06);
-
-  /* ── Primary ── */
-  --color-primary: #38bdf8;
-  --color-primary-hover: #0ea5e9;
-  --color-primary-contrast: #020617;
-  --color-primary-glow: rgba(56, 189, 248, 0.42);
-
-  /* ── Semantic ── */
-  --color-success: #4ade80;
-  --color-success-bg: rgba(74, 222, 128, 0.11);
-  --color-success-border: rgba(74, 222, 128, 0.22);
-  --color-warning: #fb923c;
-  --color-warning-bg: rgba(251, 146, 60, 0.10);
-  --color-error: #f87171;
-  --color-error-bg: rgba(248, 113, 113, 0.11);
-  --color-error-border: rgba(248, 113, 113, 0.20);
+  /* ── Typography ── */
+  --font-sans: "Inter", "Noto Sans JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   /* ── Radius ── */
-  --radius-xs: 6px;
-  --radius: 10px;
-  --radius-lg: 14px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
   --radius-pill: 999px;
 
   /* ── Spacing ── */
@@ -56,25 +24,120 @@
   --space-xl: 36px;
   --space-2xl: 56px;
 
-  /* ── Shadow / Depth ── */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.40);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
-  --shadow-glow: 0 0 24px var(--color-primary-glow);
+  /* ── Layout ── */
+  --sidebar-w: 248px;
+  --topbar-h: 56px;
+  --container-max: 1440px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 
-  /* ── Blur ── */
-  --blur-nav: saturate(180%) blur(20px);
+  /* ── Sidebar (always dark navy, like MinIO Console) ── */
+  --sidebar-bg: #0a1020;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --sidebar-fg: #c3cde0;
+  --sidebar-muted: #7d8aa5;
+  --sidebar-hover: rgba(255, 255, 255, 0.06);
+  --sidebar-active-bg: rgba(56, 189, 248, 0.14);
+  --sidebar-active-fg: #7dd3fc;
+  --sidebar-accent: #38bdf8;
+}
 
-  /* ── Font ── */
-  --font-sans: "SF Pro JP", "SF Pro Text", "SF Pro Display", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", Meiryo, "ＭＳ Ｐゴシック", "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --font-display: "SF Pro JP", "SF Pro Display", "Hiragino Kaku Gothic Pro", "ヒラギノ角ゴ Pro W3", Meiryo, sans-serif;
-  --font-mono: "SFMono-Regular", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
-  /* ── Container ── */
-  --container-max: 1080px;
+  --color-bg: #0b0f17;
+  --color-bg-soft: #0e141f;
+  --color-surface: #111826;
+  --color-surface-2: #151e2f;
+  --color-surface-hover: #1a2438;
 
-  /* ── Card / Metric (MinIO Console high-density, near-future) ── */
-  --card-radius: 12px;
-  --card-gap: 16px;
-  --gauge-size: 96px;
+  --color-fg: #e8edf6;
+  --color-fg-secondary: #b7c1d4;
+  --color-muted: #8793aa;
+  --color-disabled: #556078;
+
+  --color-border: #1e293b;
+  --color-border-strong: #2c3a52;
+  --color-border-focus: #38bdf8;
+  --color-soft: rgba(148, 163, 184, 0.09);
+
+  --color-primary: #38bdf8;
+  --color-primary-hover: #7dd3fc;
+  --color-primary-strong: #0ea5e9;
+  --color-primary-strong-hover: #38bdf8;
+  --color-on-primary: #04121f;
+  --color-primary-soft: rgba(56, 189, 248, 0.12);
+  --color-primary-border: rgba(56, 189, 248, 0.32);
+
+  --color-success: #4ade80;
+  --color-success-bg: rgba(74, 222, 128, 0.12);
+  --color-success-border: rgba(74, 222, 128, 0.28);
+  --color-warning: #fbbf24;
+  --color-warning-bg: rgba(251, 191, 36, 0.12);
+  --color-warning-border: rgba(251, 191, 36, 0.28);
+  --color-error: #f87171;
+  --color-error-bg: rgba(248, 113, 113, 0.12);
+  --color-error-border: rgba(248, 113, 113, 0.3);
+  --color-danger-strong: #dc2626;
+
+  --chart-a: #38bdf8;
+  --chart-b: #a78bfa;
+
+  --overlay: rgba(3, 6, 12, 0.7);
+  --topbar-bg: rgba(11, 15, 23, 0.8);
+  --code-bg: #0a0f18;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: #f3f5f9;
+  --color-bg-soft: #f7f9fc;
+  --color-surface: #ffffff;
+  --color-surface-2: #f7f9fc;
+  --color-surface-hover: #eef2f8;
+
+  --color-fg: #0f172a;
+  --color-fg-secondary: #334155;
+  --color-muted: #64748b;
+  --color-disabled: #94a3b8;
+
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+  --color-border-focus: #0284c7;
+  --color-soft: rgba(15, 23, 42, 0.05);
+
+  --color-primary: #0369a1;
+  --color-primary-hover: #075985;
+  --color-primary-strong: #0369a1;
+  --color-primary-strong-hover: #075985;
+  --color-on-primary: #ffffff;
+  --color-primary-soft: rgba(3, 105, 161, 0.09);
+  --color-primary-border: rgba(3, 105, 161, 0.3);
+
+  --color-success: #15803d;
+  --color-success-bg: rgba(21, 128, 61, 0.1);
+  --color-success-border: rgba(21, 128, 61, 0.28);
+  --color-warning: #b45309;
+  --color-warning-bg: rgba(180, 83, 9, 0.1);
+  --color-warning-border: rgba(180, 83, 9, 0.28);
+  --color-error: #b91c1c;
+  --color-error-bg: rgba(185, 28, 28, 0.08);
+  --color-error-border: rgba(185, 28, 28, 0.26);
+  --color-danger-strong: #dc2626;
+
+  --chart-a: #0284c7;
+  --chart-b: #7c3aed;
+
+  --overlay: rgba(15, 23, 42, 0.5);
+  --topbar-bg: rgba(243, 245, 249, 0.85);
+  --code-bg: #f1f5f9;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.1);
+  --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.2);
 }

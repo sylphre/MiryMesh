@@ -8,6 +8,9 @@ import './assets/css/tokens.css'
 import './assets/css/base.css'
 import './assets/css/layout.css'
 import './assets/css/components.css'
+import { initTheme } from './lib/theme.js'
+
+initTheme()
 
 const app = createApp(App)
 app.use(createPinia())

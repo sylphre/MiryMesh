@@ -3,6 +3,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import BrandMark from '../components/BrandMark.vue'
+import Icon from '../components/Icon.vue'
+import { api, getToken, setToken, clearToken } from '../lib/api.js'
 
 const router = useRouter()
 const username = ref('')
@@ -11,33 +14,29 @@ const error = ref('')
 const loading = ref(false)
 
 onMounted(async () => {
-  const t = localStorage.getItem('mirymesh_admin_token')
-  if (t) {
-    try {
-      const r = await fetch('/api/admin/config', { headers: { 'X-Admin-Token': t } })
-      if (r.ok) router.push('/')
-      else localStorage.removeItem('mirymesh_admin_token')
-    } catch {
-      localStorage.removeItem('mirymesh_admin_token')
-    }
+  if (!getToken()) return
+  try {
+    await api('/api/admin/config', { redirectOn401: false })
+    router.push('/')
+  } catch {
+    clearToken()
   }
 })
 
 async function submit() {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
-    const res = await fetch('/api/admin/login', {
+    const j = await api('/api/admin/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username.value, password: password.value }),
+      body: { username: username.value, password: password.value },
+      auth: false,
     })
-    if (!res.ok) throw new Error('invalid credentials')
-    const j = await res.json()
-    localStorage.setItem('mirymesh_admin_token', j.admin_token)
+    setToken(j.admin_token)
     router.push('/')
   } catch (e) {
-    error.value = e.message
+    error.value = e.status === 401 || e.status === 403 ? 'ユーザー名またはパスワードが正しくありません' : e.message
   } finally {
     loading.value = false
   }
@@ -45,17 +44,40 @@ async function submit() {
 </script>
 
 <template>
-  <main class="container container--narrow">
-    <div class="card">
-      <h2>Login</h2>
-      <p class="caption" style="margin-top: 4px;">Admin アカウントでログインしてください。</p>
-      <div v-if="error" class="state--error" style="margin-top: 16px;">{{ error }}</div>
-      <form @submit.prevent="submit" class="form form--stack" style="margin-top: 24px;">
-        <label>Username <input v-model="username" class="input" required minlength="3" placeholder="admin" /></label>
-        <label>Password <input v-model="password" type="password" class="input" required minlength="8" placeholder="••••••••" /></label>
-        <button type="submit" class="btn btn--primary" :disabled="loading">{{ loading ? '...' : 'ログイン' }}</button>
+  <div class="auth">
+    <div class="auth__card">
+      <div class="auth__brand">
+        <BrandMark :size="36" />
+        <div>
+          <div class="brand__name">MiryMesh</div>
+          <div class="brand__sub">Object Storage Console</div>
+        </div>
+      </div>
+
+      <h1 class="auth__title">Sign in</h1>
+      <p class="muted small mt-1">Admin アカウントでログインしてください。</p>
+
+      <div v-if="error" class="alert alert--error mt-3" role="alert">
+        <Icon name="alert" />
+        <div class="alert__body">{{ error }}</div>
+      </div>
+
+      <form class="stack mt-3" @submit.prevent="submit">
+        <label class="field">
+          <span class="field__label">Username</span>
+          <input v-model="username" class="input" required minlength="3" autocomplete="username" autofocus placeholder="admin" />
+        </label>
+        <label class="field">
+          <span class="field__label">Password</span>
+          <input v-model="password" type="password" class="input" required minlength="8" autocomplete="current-password" placeholder="••••••••" />
+        </label>
+        <button type="submit" class="btn btn--primary btn--block" :disabled="loading">
+          <span v-if="loading" class="spinner" aria-hidden="true"></span>
+          Sign in
+        </button>
       </form>
-      <p class="caption" style="margin-top: 16px;">未初期化の場合は <router-link to="/setup">Setup</router-link> へ。</p>
+
+      <p class="muted small mt-3">未初期化の場合は <router-link class="link" to="/setup">Setup</router-link> へ。</p>
     </div>
-  </main>
+  </div>
 </template>

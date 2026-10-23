@@ -13,6 +13,7 @@ const routes = [
   { path: '/nodes', component: () => import('../views/Nodes.vue'), meta: { requiresAuth: true } },
   { path: '/disks', component: () => import('../views/Disks.vue'), meta: { requiresAuth: true } },
   { path: '/buckets', component: () => import('../views/Buckets.vue'), meta: { requiresAuth: true } },
+  { path: '/buckets/:name', component: () => import('../views/BucketDetail.vue'), meta: { requiresAuth: true } },
   { path: '/jobs', component: () => import('../views/Jobs.vue'), meta: { requiresAuth: true } },
   { path: '/settings', component: () => import('../views/Settings.vue'), meta: { requiresAuth: true } },
 ]

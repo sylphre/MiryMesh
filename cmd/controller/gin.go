@@ -58,11 +58,16 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 	adminG.POST("/login", ginWrap(h.HandleLogin))
 	adminG.POST("/generate-credentials", ginWrapAuth(h, h.HandleGenerateCredentials))
 	adminG.POST("/pair-token", ginWrapAuth(h, h.HandlePairToken))
+	adminG.POST("/nodes/adopt", ginWrapAuth(h, h.HandleAdoptNode))
 	adminG.GET("/config", ginWrap(h.HandleConfig))
 	adminG.PUT("/config/policy", ginWrapAuth(h, h.HandleConfigPolicy))
 
 	// Internal datanode (on admin port as well for simplicity; S3 port also serves /internal)
 	dnHandler := datanode.NewHandler(reg, internalToken)
+	// UI-issued one-time pair tokens are accepted by /internal/register.
+	if sdb, ok := setupStore.(*admin.SetupStoreDB); ok && sdb != nil {
+		dnHandler.SetPairConsumer(sdb.ConsumePairToken)
+	}
 	r.POST("/internal/register", ginWrap(dnHandler.HandleRegister))
 	r.POST("/internal/heartbeat", ginWrap(dnHandler.HandleHeartbeat))
 	r.POST("/internal/disks", ginWrap(dnHandler.HandleDisks))
@@ -92,10 +97,8 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 				c.Redirect(302, "/setup")
 				return
 			}
-			if setupStore.IsInitialized() && !hasTokenGin(c) && isHTML(c) {
-				c.Redirect(302, "/login")
-				return
-			}
+			// Auth is enforced by the SPA router guard and the API: the token lives in
+			// localStorage, so a browser navigation (F5) never carries it.
 			c.FileFromFS("/", http.FS(distFS))
 		})
 		r.NoRoute(func(c *gin.Context) {
@@ -112,11 +115,6 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 					c.Redirect(302, "/setup")
 					return
 				}
-			} else if setupStore.IsInitialized() && !hasTokenGin(c) && isHTML(c) {
-				if c.Request.URL.Path != "/login" && c.Request.URL.Path != "/setup" {
-					c.Redirect(302, "/login")
-					return
-				}
 			}
 			c.FileFromFS("/", http.FS(distFS))
 		})
@@ -127,10 +125,6 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 		r.GET("/", func(c *gin.Context) {
 			if !setupStore.IsInitialized() && isHTML(c) {
 				c.Redirect(302, "/setup")
-				return
-			}
-			if setupStore.IsInitialized() && !hasTokenGin(c) && isHTML(c) {
-				c.Redirect(302, "/login")
 				return
 			}
 			c.File(filepath.Join(distDir, "index.html"))
@@ -147,11 +141,6 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 			if !setupStore.IsInitialized() && c.Request.URL.Path != "/setup" {
 				if isHTML(c) {
 					c.Redirect(302, "/setup")
-					return
-				}
-			} else if setupStore.IsInitialized() && !hasTokenGin(c) && isHTML(c) {
-				if c.Request.URL.Path != "/login" && c.Request.URL.Path != "/setup" {
-					c.Redirect(302, "/login")
 					return
 				}
 			}
@@ -175,7 +164,7 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 	return r
 }
 
-func newS3Engine(router *s3api.Router, authStore *auth.Store, cfg config.Config, reg *datanode.Registry, internalToken string) *gin.Engine {
+func newS3Engine(router *s3api.Router, authStore *auth.Store, cfg config.Config, reg *datanode.Registry, internalToken string, setupStore admin.SetupStoreIface) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -184,6 +173,10 @@ func newS3Engine(router *s3api.Router, authStore *auth.Store, cfg config.Config,
 	r.GET("/health", func(c *gin.Context) { c.String(200, "ok") })
 	// Internal on S3 port too
 	dnHandler := datanode.NewHandler(reg, internalToken)
+	// UI-issued one-time pair tokens are accepted on this port as well.
+	if sdb, ok := setupStore.(*admin.SetupStoreDB); ok && sdb != nil {
+		dnHandler.SetPairConsumer(sdb.ConsumePairToken)
+	}
 	r.POST("/internal/register", ginWrap(dnHandler.HandleRegister))
 	r.POST("/internal/heartbeat", ginWrap(dnHandler.HandleHeartbeat))
 	r.POST("/internal/disks", ginWrap(dnHandler.HandleDisks))
