@@ -84,6 +84,10 @@ func (h *Handler) handleBucketSub(w http.ResponseWriter, r *http.Request) {
 		h.handleS3Policy(w, r, bucket)
 		return
 	}
+	if parts[1] == "quota" {
+		h.handleBucketQuota(w, r, bucket)
+		return
+	}
 	if parts[1] == "objects" {
 		h.handleBucketObjects(w, r, bucket)
 		return

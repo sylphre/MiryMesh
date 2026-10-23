@@ -103,6 +103,10 @@ func (rt *Router) handleUploadPart(w http.ResponseWriter, r *http.Request, bucke
 		writeFailure(w, r, cfgErr)
 		return
 	}
+	// Pending parts count towards the bucket quota.
+	if rt.rejectOverQuota(w, r, bucket, "", requestBodySize(r)) {
+		return
+	}
 	pw, prepErr := preparePart(r.Header, cfg, r.Body)
 	if prepErr != nil {
 		writeFailure(w, r, prepErr)

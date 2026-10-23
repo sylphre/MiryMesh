@@ -259,6 +259,10 @@ func (rt *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	if rt.rejectLocked(w, r, bucket, key) {
 		return
 	}
+	// Per-bucket storage quota (set via the admin API); 507 when exceeded.
+	if rt.rejectOverQuota(w, r, bucket, key, requestBodySize(r)) {
+		return
+	}
 	// Placement validation (M3+): check policy feasibility. Insufficient maps to 507.
 	var targets []struct{ NodeID, Path string }
 	if rt.placing != nil {

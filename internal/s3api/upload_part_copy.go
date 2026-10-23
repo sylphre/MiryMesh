@@ -89,6 +89,10 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		}
 		srcData = srcData[start : end+1]
 	}
+	// Pending parts count towards the bucket quota.
+	if rt.rejectOverQuota(w, r, bucket, "", int64(len(srcData))) {
+		return
+	}
 	// The part follows the upload's settings: same SSE-C key, same checksum algorithm.
 	cfg, cfgErr := rt.loadMPConfig(bucket, uploadID)
 	if cfgErr != nil {

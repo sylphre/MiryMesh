@@ -92,6 +92,10 @@ func (h *Handler) downloadObject(w http.ResponseWriter, bucket, key string) {
 }
 
 func (h *Handler) uploadObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	if err := s3api.CheckBucketQuota(h.storage, bucket, key, r.ContentLength); err != nil {
+		writeObjectError(w, err)
+		return
+	}
 	body := http.MaxBytesReader(w, r.Body, maxAdminUploadBytes)
 	meta, err := h.storage.PutObject(bucket, key, r.Header.Get("Content-Type"), nil, body)
 	if err != nil {
@@ -117,6 +121,10 @@ func writeObjectError(w http.ResponseWriter, err error) {
 	}
 	var apiErr s3api.APIError
 	if errors.As(err, &apiErr) {
+		if apiErr.Status == http.StatusInsufficientStorage {
+			http.Error(w, apiErr.Message, http.StatusInsufficientStorage)
+			return
+		}
 		switch apiErr.Code {
 		case "NoSuchKey", "NoSuchBucket":
 			http.Error(w, apiErr.Code, http.StatusNotFound)

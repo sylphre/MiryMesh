@@ -19,6 +19,7 @@ const tabs = [
   { id: 'objects', label: 'Objects', icon: 'folder' },
   { id: 'access', label: 'Access', icon: 'lock' },
   { id: 'placement', label: 'Placement', icon: 'disk' },
+  { id: 'quota', label: 'Quota', icon: 'disk' },
   { id: 'advanced', label: 'Advanced', icon: 'settings' },
 ]
 const tab = ref('objects')
@@ -536,6 +537,83 @@ async function savePlacement() {
   }
 }
 
+/* ───────────── Quota ───────────── */
+
+const quotaUnits = [
+  { label: 'B', factor: 1 },
+  { label: 'KiB', factor: 1024 },
+  { label: 'MiB', factor: 1024 ** 2 },
+  { label: 'GiB', factor: 1024 ** 3 },
+  { label: 'TiB', factor: 1024 ** 4 },
+]
+
+const quotaValue = ref('')
+const quotaUnit = ref(1024 ** 3)
+const savedQuota = ref(0)
+const quotaUsed = ref(null)
+const quotaLoading = ref(true)
+const quotaSaving = ref(false)
+const quotaError = ref('')
+
+// '' (empty) means unlimited; an invalid number yields NaN.
+const quotaBytes = computed(() => {
+  const raw = String(quotaValue.value ?? '').trim()
+  if (raw === '') return 0
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return NaN
+  return Math.round(n * quotaUnit.value)
+})
+
+const quotaPercent = computed(() => {
+  if (!savedQuota.value || quotaUsed.value === null) return 0
+  return Math.min(100, Math.round((quotaUsed.value / savedQuota.value) * 100))
+})
+
+function applyQuota(j) {
+  const max = j && Number.isFinite(j.max_bytes) ? j.max_bytes : 0
+  savedQuota.value = max
+  quotaUsed.value = j && Number.isFinite(j.used_bytes) ? j.used_bytes : null
+  if (max === 0) {
+    quotaValue.value = ''
+    return
+  }
+  // Show the value in the largest unit that divides it exactly.
+  const unit = [...quotaUnits].reverse().find((u) => max % u.factor === 0) || quotaUnits[0]
+  quotaUnit.value = unit.factor
+  quotaValue.value = String(max / unit.factor)
+}
+
+async function loadQuota() {
+  quotaLoading.value = true
+  quotaError.value = ''
+  try {
+    applyQuota(await api(`/api/admin/buckets/${encBucket.value}/quota`))
+  } catch (e) {
+    quotaError.value = e.message
+  } finally {
+    quotaLoading.value = false
+  }
+}
+
+async function saveQuota() {
+  if (quotaSaving.value) return
+  if (Number.isNaN(quotaBytes.value)) {
+    quotaError.value = '容量の上限には 0 以上の数値を入力してください'
+    return
+  }
+  quotaSaving.value = true
+  quotaError.value = ''
+  try {
+    const j = await api(`/api/admin/buckets/${encBucket.value}/quota`, { method: 'PUT', body: { max_bytes: quotaBytes.value } })
+    applyQuota(j)
+    toastOk(savedQuota.value === 0 ? '容量の上限を解除しました' : '容量の上限を保存しました')
+  } catch (e) {
+    quotaError.value = e.message
+  } finally {
+    quotaSaving.value = false
+  }
+}
+
 /* ───────────── Bucket ───────────── */
 
 async function deleteBucket() {
@@ -563,6 +641,7 @@ function loadAll() {
   loadObjects()
   loadAccess()
   loadPlacement()
+  loadQuota()
 }
 
 onMounted(loadAll)
@@ -786,6 +865,48 @@ const advancedItems = [
         <div class="row">
           <button type="submit" class="btn btn--primary" :disabled="placementSaving || placement === savedPlacement">
             <span v-if="placementSaving" class="spinner" aria-hidden="true"></span>保存
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Quota -->
+    <section v-else-if="tab === 'quota'" id="panel-quota" role="tabpanel" aria-labelledby="tab-quota" class="card">
+      <div class="card__head"><h2 class="card__title">Quota</h2></div>
+      <div v-if="quotaLoading" class="card__body" aria-busy="true"><div class="skeleton" style="height: 100px"></div></div>
+      <form v-else class="card__body stack" @submit.prevent="saveQuota">
+        <p class="muted small">この Bucket に格納できる合計サイズの上限を指定します。上限を超える書き込みは 507 InsufficientStorage で拒否されます。空欄または 0 で無制限です。</p>
+        <div v-if="quotaError" class="alert alert--error" role="alert">
+          <Icon name="alert" /><div class="alert__body">{{ quotaError }}</div>
+        </div>
+        <div class="field">
+          <label class="field__label" for="quota-value">容量の上限</label>
+          <div class="row">
+            <input
+              id="quota-value"
+              v-model="quotaValue"
+              class="input"
+              type="number"
+              min="0"
+              step="any"
+              inputmode="decimal"
+              placeholder="無制限"
+              style="max-width: 200px"
+            />
+            <select v-model.number="quotaUnit" class="input" aria-label="単位" style="max-width: 110px">
+              <option v-for="u in quotaUnits" :key="u.label" :value="u.factor">{{ u.label }}</option>
+            </select>
+          </div>
+        </div>
+        <div v-if="quotaUsed !== null" class="stack">
+          <span class="muted small">
+            使用量: {{ formatBytes(quotaUsed) }}<template v-if="savedQuota"> / {{ formatBytes(savedQuota) }}（{{ quotaPercent }}%）</template>
+          </span>
+          <progress v-if="savedQuota" :value="quotaUsed" :max="savedQuota" aria-label="容量の使用率" style="width: 100%"></progress>
+        </div>
+        <div class="row">
+          <button type="submit" class="btn btn--primary" :disabled="quotaSaving || quotaBytes === savedQuota">
+            <span v-if="quotaSaving" class="spinner" aria-hidden="true"></span>保存
           </button>
         </div>
       </form>

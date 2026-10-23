@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 - S3-compatible API endpoint (P0: Put/Get/Delete/List/Head, CopyObject, DeleteObjects, multipart).
 - Placement engine (single/dual/triple/ALL, 95% quota).
+- Per-bucket storage quota: `GET/PUT /api/admin/buckets/{bucket}/quota` and a Quota tab in the console. Writes beyond the limit (PutObject, CopyObject, multipart parts, console upload) return `507 InsufficientStorage`; `0` means unlimited.
 - Replication engine (checksum, retry, interrupted-job recovery).
 - Metadata evacuation / adoption (fan-out to datanodes, placement + auth presence snapshot).
 - Management GUI (plain HTML/CSS/JS, no build) and `/api/admin/*` + `/internal/*`.

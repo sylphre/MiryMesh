@@ -80,6 +80,10 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 		writeError(w, r, errInvalidRequest)
 		return
 	}
+	// Per-bucket storage quota of the destination bucket.
+	if rt.rejectOverQuota(w, r, destBucket, destKey, srcMeta.Size) {
+		return
+	}
 	// Stream copy: validate placement using src size, then stream via PutObject.
 	if rt.placing != nil {
 		if _, pErr := rt.placing.Resolve(destBucket, srcMeta.Size); pErr != nil {
