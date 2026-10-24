@@ -30,8 +30,6 @@ contents:
     dst: /lib/systemd/system/mirymesh-datanode.service
   - src: packaging/config/config.yaml.example
     dst: /etc/mirymesh/config.yaml.example
-  - src: frontend/dist
-    dst: /usr/share/mirymesh/static
   - dst: /var/lib/mirymesh
     type: dir
     file_info: { mode: 0750, owner: mirymesh, group: mirymesh }

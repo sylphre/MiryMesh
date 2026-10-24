@@ -28,6 +28,9 @@
 #
 # Dev (build from source). The default branch is `release` (`prerelease` with --prerelease):
 #   sudo bash packaging/scripts/install.sh --dev [--branch NAME]
+# A Master source build also builds the web console (frontend/, Vue + Vite) and embeds it in the
+# controller. This needs Node.js 22+ and npm on the host; the script does not install them and
+# stops with an error if they are missing.
 # Never prompt (for scripts / automation): add --yes
 #
 # Env overrides:
@@ -391,10 +394,38 @@ if ! id -u mirymesh >/dev/null 2>&1; then
     || useradd --system --gid mirymesh mirymesh || true
 fi
 
+# Web console (frontend/, Vue + Vite). frontend/dist is git-ignored and go:embed bakes it into the
+# controller, so it must be built BEFORE `go build`; otherwise the binary has no console at all.
+# Node.js and npm are prerequisites like the database: this script does not install them.
+build_frontend() {
+  [ -f "$SRC/frontend/package.json" ] || die "frontend/ not found in $SRC — cannot build the web console"
+  command -v node >/dev/null 2>&1 \
+    || die "node not found — install Node.js 22+ and npm (apt: nodejs npm, dnf: nodejs npm, apk: nodejs npm) then rerun"
+  command -v npm >/dev/null 2>&1 \
+    || die "npm not found — install npm (apt: npm, dnf: npm, apk: npm) then rerun"
+  _fe_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+  case "$_fe_major" in ''|*[!0-9]*) _fe_major=0 ;; esac
+  [ "$_fe_major" -ge 22 ] \
+    || die "Node.js 22+ is required to build the web console (found $(node --version 2>/dev/null || echo unknown)) — upgrade Node.js then rerun"
+  log "Building the web console with Node.js $(node --version) (npm ci && npm run build)"
+  _fe_tmp="$(mktemp -d /tmp/mirymesh-frontend.XXXXXX)"
+  (
+    export npm_config_cache="$_fe_tmp/npm-cache"
+    cd "$SRC/frontend" || exit 1
+    npm ci --no-audit --no-fund && npm run build
+  ) || { rm -rf "$_fe_tmp"; die "web console build failed — see the npm output above"; }
+  rm -rf "$_fe_tmp"
+  [ -s "$SRC/frontend/dist/index.html" ] \
+    || die "frontend/dist/index.html is missing after the build — refusing to install a controller without the web console"
+  log "Web console built: frontend/dist will be embedded into the controller"
+}
+
 install_from_source() {
   if ! command -v go >/dev/null 2>&1; then
     die "go not found — install golang (apt: golang-go, dnf: golang) then rerun"
   fi
+  # go:embed reads frontend/dist at compile time, so the console is built before `go build`.
+  if [ "$ROLE" != "client" ]; then build_frontend; fi
   log "Building from source (go 1.22, trimpath, no Docker)"
   _ldf=""
   [ -z "$VERSION" ] || _ldf="-X github.com/sylphre/MiryMesh/internal/version.Version=$VERSION"
@@ -404,8 +435,9 @@ install_from_source() {
   install -m 0755 /tmp/mirymesh-controller /usr/local/bin/mirymesh-controller
   install -m 0755 /tmp/mirymesh-datanode   /usr/local/bin/mirymesh-datanode
   install -m 0755 /tmp/mirymesh            /usr/local/bin/mirymesh
-  mkdir -p /usr/share/mirymesh; rm -rf /usr/share/mirymesh/static
-  cp -a "$SRC/web/static" /usr/share/mirymesh/static
+  # The console is embedded in the controller binary. Drop the copy an older install left behind.
+  rm -rf /usr/share/mirymesh/static
+  rmdir /usr/share/mirymesh 2>/dev/null || true
   if [ -f "$SRC/packaging/systemd/mirymesh-controller.service" ]; then
     sed 's|/usr/bin/mirymesh-controller|/usr/local/bin/mirymesh-controller|g' "$SRC/packaging/systemd/mirymesh-controller.service" > /etc/systemd/system/mirymesh-controller.service
     sed 's|/usr/bin/mirymesh-datanode|/usr/local/bin/mirymesh-datanode|g' "$SRC/packaging/systemd/mirymesh-datanode.service" > /etc/systemd/system/mirymesh-datanode.service
@@ -735,8 +767,8 @@ if command -v systemctl >/dev/null 2>&1; then
     elif curl -sf http://127.0.0.1:9001/api/admin/setup/status >/dev/null 2>&1; then log "Controller up (9001/setup/status ok)"; else log "Controller not yet up — check journalctl -u mirymesh-controller -n 20"; journalctl -u mirymesh-controller -n 20 2>/dev/null | head -20 || true; fi
   fi
   if [ "$ROLE" = "master" ]; then
-    log "To start Master: sudo systemctl enable --now mirymesh-controller && xdg-open http://127.0.0.1:9000/  # setup redirects to http://127.0.0.1:9001/static/setup.html (S3 0.0.0.0:9000 / Admin 0.0.0.0:9001, Tailscale <tailscale-ip>:900x, firewall/Tailscale ACL required)"
-    log "Setup:    Master 初回はブラウザで http://<tailscale-ip>:9001/static/setup.html または http://127.0.0.1:9001/static/setup.html で AccessKey/Secret/Policy を入力 (Token は localStorage に保存, 0.0.0.0:9001 は public に晒さない)"
+    log "To start Master: sudo systemctl enable --now mirymesh-controller && xdg-open http://127.0.0.1:9000/  # setup redirects to http://127.0.0.1:9001/setup (S3 0.0.0.0:9000 / Admin 0.0.0.0:9001, Tailscale <tailscale-ip>:900x, firewall/Tailscale ACL required)"
+    log "Setup:    Master 初回はブラウザで http://<tailscale-ip>:9001/setup または http://127.0.0.1:9001/setup で AccessKey/Secret/Policy を入力 (Token は localStorage に保存, 0.0.0.0:9001 は public に晒さない)"
     log "Status:   systemctl status mirymesh-controller; journalctl -u mirymesh-controller -f"
     log "Health:   curl -f http://127.0.0.1:9000/healthz                          # S3 0.0.0.0:9000 (Tailscale <tailscale-ip>:9000)"
     log "Admin:    curl -H \"X-Admin-Token: \$TOKEN\" http://127.0.0.1:9001/api/admin/health  # Admin 0.0.0.0:9001 (Tailscale <tailscale-ip>:9001, firewall required)"

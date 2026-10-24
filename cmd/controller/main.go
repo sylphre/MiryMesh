@@ -268,10 +268,9 @@ func main() {
 		}
 	})
 
-	staticDir := resolveStaticDir()
 	// Gin engines
 	s3Engine := newS3Engine(s3Router, authStore, userMgr, cfg, reg, internalToken, setupStore)
-	adminEngine := newAdminEngine(adminHandler, setupStore, staticDir, cfg, reg, internalToken)
+	adminEngine := newAdminEngine(adminHandler, setupStore, cfg, reg, internalToken)
 	_ = s3Engine
 	_ = adminEngine
 
@@ -427,13 +426,4 @@ func detectTailscaleIP() string {
 	}
 	// Try running tailscale binary if available
 	return "<tailscale-ip>"
-}
-
-func resolveStaticDir() string {
-	for _, c := range []string{"web/static", "./web/static", "/usr/share/mirymesh/static"} {
-		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
-			return c
-		}
-	}
-	return "web/static"
 }
