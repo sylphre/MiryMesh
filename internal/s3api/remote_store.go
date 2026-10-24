@@ -150,6 +150,14 @@ func (r *RemoteStore) selectTargets(bucket string, size int64) ([]placement.Targ
 	if r.resolver != nil {
 		policy = r.resolver.PolicyFor(bucket)
 	}
+	// A resolver that knows per-bucket placement rules (mode, allow-list, disks
+	// reserved for other buckets) gets them applied; any other resolver keeps the
+	// old policy-only behavior.
+	if oc, ok := r.resolver.(interface {
+		OptionsFor(bucket string) placement.SelectOptions
+	}); ok {
+		return r.engine.SelectWith(r.reg, policy, size, oc.OptionsFor(bucket))
+	}
 	return r.engine.Select(r.reg, policy, size)
 }
 
@@ -178,6 +186,10 @@ func (r *RemoteStore) PutObject(bucket, key string, contentType string, meta map
 		return ObjectMeta{}, fmt.Errorf("node %s not found", tgt.NodeID)
 	}
 	urlStr := fmt.Sprintf("http://%s/internal/objects/%s/%s", nodeAddr, url.PathEscape(bucket), url.PathEscape(key))
+	// Tell the DataNode which of its disks the placement engine picked.
+	if tgt.Path != "" {
+		urlStr += "?disk=" + url.QueryEscape(tgt.Path)
+	}
 	req, _ := http.NewRequest("PUT", urlStr, bytes.NewReader(data))
 	req.Header.Set("Content-Type", contentType)
 	for k, v := range meta {
@@ -282,9 +294,10 @@ func (r *RemoteStore) ListObjectsV2(bucket, prefix, delimiter, continuationToken
 	if _, ok := r.buckets[bucket]; !ok {
 		return ListObjectsV2Result{}, errNoSuchBucket
 	}
-	// Fan-out to nodes and merge (dedupe by key)
-	seen := map[string]ObjectMeta{}
-	var prefixes = map[string]bool{}
+	// Fan-out: every online node returns its first maxKeys entries after the
+	// continuation token; mergeListings keeps the first maxKeys of the union and
+	// reports whether more entries remain.
+	var pages []ListObjectsV2Result
 	for _, n := range r.reg.ListNodes() {
 		if n.Status != datanode.StatusOnline {
 			continue
@@ -311,36 +324,30 @@ func (r *RemoteStore) ListObjectsV2(bucket, prefix, delimiter, continuationToken
 		if err != nil {
 			continue
 		}
+		if resp.StatusCode != http.StatusOK {
+			// Node does not have the bucket (or failed): skip it, like an offline node.
+			_ = resp.Body.Close()
+			continue
+		}
 		var body struct {
-			Objects        []ObjectMeta `json:"objects"`
-			CommonPrefixes []string     `json:"prefixes"`
+			Objects               []ObjectMeta `json:"objects"`
+			CommonPrefixes        []string     `json:"prefixes"`
+			IsTruncated           bool         `json:"is_truncated"`
+			NextContinuationToken string       `json:"next_continuation_token"`
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&body)
+		decErr := json.NewDecoder(resp.Body).Decode(&body)
 		_ = resp.Body.Close()
-		for _, o := range body.Objects {
-			if _, ok := seen[o.Key]; !ok {
-				seen[o.Key] = o
-			}
+		if decErr != nil {
+			continue
 		}
-		for _, p := range body.CommonPrefixes {
-			prefixes[p] = true
-		}
+		pages = append(pages, ListObjectsV2Result{
+			Objects:               body.Objects,
+			CommonPrefixes:        body.CommonPrefixes,
+			IsTruncated:           body.IsTruncated,
+			NextContinuationToken: body.NextContinuationToken,
+		})
 	}
-	keys := make([]string, 0, len(seen))
-	for k := range seen {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var out ListObjectsV2Result
-	for _, k := range keys {
-		out.Objects = append(out.Objects, seen[k])
-	}
-	for p := range prefixes {
-		out.CommonPrefixes = append(out.CommonPrefixes, p)
-	}
-	sort.Strings(out.CommonPrefixes)
-	out.KeyCount = len(out.Objects)
-	return out, nil
+	return mergeListings(pages, maxKeys), nil
 }
 
 // Multipart: delegate to first target DataNode (DataNode's LocalStore handles multipart)

@@ -567,6 +567,156 @@ async function savePlacement() {
   }
 }
 
+/* Placement rule: 配置モード / 使用するディスク / 専用ディスク */
+
+const modeOptions = [
+  { value: 'spread', title: 'spread', desc: 'レプリカを別々の Node に分散（既定）' },
+  { value: 'same_node', title: 'same_node', desc: '同じ Node の別々のディスクに複製' },
+  { value: 'any', title: 'any', desc: '別ディスクに複製。可能なら別 Node、足りなければ同じ Node も可' },
+]
+
+const ruleMode = ref('spread')
+const ruleAllow = ref([])
+const ruleReserved = ref([])
+const ruleDisks = ref([])
+const rawDisks = ref([])
+const savedRuleSig = ref('')
+const ruleLoading = ref(true)
+const ruleSaving = ref(false)
+const ruleError = ref('')
+
+function cleanDiskPath(p) {
+  const s = String(p || '').trim()
+  return s.length > 1 ? s.replace(/\/+$/, '') || '/' : s
+}
+
+function diskKey(nodeId, path) {
+  return `${nodeId}::${cleanDiskPath(path)}`
+}
+
+function ruleSignature() {
+  return JSON.stringify([ruleMode.value, [...ruleAllow.value].sort(), [...ruleReserved.value].sort()])
+}
+
+const ruleDirty = computed(() => ruleSignature() !== savedRuleSig.value)
+
+// doc: GET/PUT /placement の応答, disks: GET /api/admin/disks の disks
+function applyRuleDoc(doc, disks) {
+  const byKey = new Map()
+  for (const d of disks) {
+    const key = diskKey(d.NodeID, d.Path)
+    byKey.set(key, {
+      key,
+      node_id: d.NodeID,
+      path: cleanDiskPath(d.Path),
+      capacity: d.Capacity || 0,
+      used: d.Used || 0,
+      missing: false,
+      other: '',
+    })
+  }
+  // 登録から消えたディスクがルールに残っていても、画面から外せるように行を作る。
+  const keysOf = (list) =>
+    (Array.isArray(list) ? list : []).map((r) => {
+      const key = diskKey(r.node_id, r.path)
+      if (!byKey.has(key)) {
+        byKey.set(key, { key, node_id: r.node_id, path: cleanDiskPath(r.path), capacity: 0, used: 0, missing: true, other: '' })
+      }
+      return key
+    })
+  const allow = keysOf(doc && doc.disks)
+  const reserved = keysOf(doc && doc.reserved_disks)
+  const others = doc && Array.isArray(doc.reserved_by_others) ? doc.reserved_by_others : []
+  for (const o of others) {
+    const e = byKey.get(diskKey(o.node_id, o.path))
+    if (e) e.other = o.bucket
+  }
+  ruleDisks.value = [...byKey.values()].sort(
+    (a, b) => a.node_id.localeCompare(b.node_id) || a.path.localeCompare(b.path),
+  )
+  ruleMode.value = (doc && doc.mode) || 'spread'
+  ruleAllow.value = allow
+  ruleReserved.value = reserved
+  savedRuleSig.value = ruleSignature()
+}
+
+let ruleSeq = 0
+async function loadRule() {
+  const seq = ++ruleSeq
+  const name = encBucket.value
+  ruleLoading.value = true
+  ruleError.value = ''
+  try {
+    const [doc, dj] = await Promise.all([
+      api(`/api/admin/buckets/${name}/placement`),
+      api('/api/admin/disks'),
+    ])
+    if (seq !== ruleSeq) return
+    rawDisks.value = dj && Array.isArray(dj.disks) ? dj.disks : []
+    applyRuleDoc(doc, rawDisks.value)
+  } catch (e) {
+    if (seq === ruleSeq) ruleError.value = e.message
+  } finally {
+    if (seq === ruleSeq) ruleLoading.value = false
+  }
+}
+
+function toggleAllow(key, on) {
+  const set = new Set(ruleAllow.value)
+  if (on) {
+    set.add(key)
+  } else {
+    set.delete(key)
+    // 使用対象から外したディスクは専用にもできない。
+    ruleReserved.value = ruleReserved.value.filter((k) => k !== key)
+  }
+  ruleAllow.value = [...set]
+}
+
+function toggleReserved(key, on) {
+  const set = new Set(ruleReserved.value)
+  if (on) {
+    set.add(key)
+    // 使用するディスクを絞っている場合、専用ディスクもその一覧に含める必要がある。
+    if (ruleAllow.value.length > 0 && !ruleAllow.value.includes(key)) {
+      ruleAllow.value = [...ruleAllow.value, key]
+    }
+  } else {
+    set.delete(key)
+  }
+  ruleReserved.value = [...set]
+}
+
+function diskRefs(keys) {
+  const idx = new Map(ruleDisks.value.map((d) => [d.key, d]))
+  return keys
+    .map((k) => idx.get(k))
+    .filter(Boolean)
+    .map((d) => ({ node_id: d.node_id, path: d.path }))
+}
+
+async function saveRule() {
+  if (ruleSaving.value) return
+  ruleSaving.value = true
+  ruleError.value = ''
+  try {
+    const doc = await api(`/api/admin/buckets/${encBucket.value}/placement`, {
+      method: 'PUT',
+      body: {
+        mode: ruleMode.value,
+        disks: diskRefs(ruleAllow.value),
+        reserved_disks: diskRefs(ruleReserved.value),
+      },
+    })
+    applyRuleDoc(doc, rawDisks.value)
+    toastOk('配置ルールを保存しました')
+  } catch (e) {
+    ruleError.value = e.message
+  } finally {
+    ruleSaving.value = false
+  }
+}
+
 /* ───────────── Quota ───────────── */
 
 const quotaUnits = [
@@ -729,6 +879,7 @@ function loadAll() {
   loadObjects()
   loadAccess()
   loadPlacement()
+  loadRule()
   loadQuota()
   loadDomains()
 }
@@ -980,6 +1131,100 @@ const advancedItems = [
             <span v-if="placementSaving" class="spinner" aria-hidden="true"></span>保存
           </button>
         </div>
+      </form>
+
+      <form class="card__body stack" aria-labelledby="rule-title" @submit.prevent="saveRule">
+        <h3 id="rule-title" style="margin: 0; font-size: 1rem">配置ルール</h3>
+        <p class="muted small">
+          レプリカを別 Node に置くか同じ Node の別ディスクに置くか、この Bucket が書き込めるディスク、他の Bucket に使わせない専用ディスクを指定します。
+          ルールは次の書き込みから適用され、保存済みのオブジェクトは移動しません。
+        </p>
+        <div v-if="ruleError" class="alert alert--error" role="alert">
+          <Icon name="alert" /><div class="alert__body">{{ ruleError }}</div>
+        </div>
+        <div v-if="ruleLoading" class="skeleton" style="height: 100px" aria-busy="true"></div>
+        <template v-else>
+          <fieldset class="field" style="border: 0; padding: 0; margin: 0; min-width: 0">
+            <legend class="field__label">配置モード</legend>
+            <div class="choices">
+              <label v-for="m in modeOptions" :key="m.value" class="choice" :class="{ 'choice--on': ruleMode === m.value }">
+                <input
+                  v-model="ruleMode"
+                  type="radio"
+                  name="bucket-placement-mode"
+                  :value="m.value"
+                  :disabled="savedPlacement === 'ALL' && m.value !== 'spread'"
+                />
+                <span class="choice__title">{{ m.title }}</span>
+                <span class="choice__desc">{{ m.desc }}</span>
+              </label>
+            </div>
+          </fieldset>
+          <div v-if="savedPlacement === 'ALL'" class="alert alert--warning">
+            <Icon name="alert" />
+            <div class="alert__body">Policy が ALL のときは spread のみ選べます。</div>
+          </div>
+
+          <div class="field">
+            <span class="field__label">ディスク</span>
+            <span class="field__hint">
+              「使用」を 1 つも選ばないと全ディスクが対象です。選ぶと、この Bucket はそのディスクにだけ書き込みます。
+              「専用」にしたディスクには、この Bucket 以外は書き込めません。
+            </span>
+            <p v-if="ruleDisks.length === 0" class="muted small">登録されたディスクがありません。</p>
+            <div v-else class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Node</th>
+                    <th>Path</th>
+                    <th class="num">使用量</th>
+                    <th>使用</th>
+                    <th>専用</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="d in ruleDisks" :key="d.key">
+                    <td class="mono">{{ d.node_id }}</td>
+                    <td class="mono" style="overflow-wrap: anywhere">
+                      {{ d.path }}
+                      <span v-if="d.other" class="badge badge--warning">{{ d.other }} 専用</span>
+                      <span v-else-if="d.missing" class="badge">未登録</span>
+                    </td>
+                    <td class="num">{{ d.capacity ? `${formatBytes(d.used)} / ${formatBytes(d.capacity)}` : '—' }}</td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        :checked="ruleAllow.includes(d.key)"
+                        :disabled="!!d.other || (d.missing && !ruleAllow.includes(d.key))"
+                        :aria-label="`${d.node_id}:${d.path} を使用する`"
+                        @change="toggleAllow(d.key, $event.target.checked)"
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        :checked="ruleReserved.includes(d.key)"
+                        :disabled="!!d.other || (d.missing && !ruleReserved.includes(d.key))"
+                        :aria-label="`${d.node_id}:${d.path} をこの Bucket 専用にする`"
+                        @change="toggleReserved(d.key, $event.target.checked)"
+                      />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="row">
+            <button type="submit" class="btn btn--primary" :disabled="ruleSaving || !ruleDirty">
+              <span v-if="ruleSaving" class="spinner" aria-hidden="true"></span>保存
+            </button>
+            <button type="button" class="btn" :disabled="ruleSaving" @click="loadRule">
+              <Icon name="refresh" :size="16" />ディスクを再読み込み
+            </button>
+          </div>
+        </template>
       </form>
     </section>
 

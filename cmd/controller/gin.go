@@ -50,6 +50,8 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, cfg conf
 	adminG.DELETE("/buckets/:bucket/s3-policy", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.GET("/buckets/:bucket/quota", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.PUT("/buckets/:bucket/quota", ginWrapAuth(h, h.HandleBucketSub))
+	adminG.GET("/buckets/:bucket/placement", ginWrapAuth(h, h.HandleBucketSub))
+	adminG.PUT("/buckets/:bucket/placement", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.GET("/buckets/:bucket/domains", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.PUT("/buckets/:bucket/domains", ginWrapAuth(h, h.HandleBucketSub))
 	adminG.GET("/buckets/:bucket/objects", ginWrapAuth(h, h.HandleBucketSub))

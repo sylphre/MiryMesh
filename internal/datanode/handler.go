@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sylphre/MiryMesh/internal/metadata"
 )
@@ -284,21 +285,45 @@ func (h *Handler) handleRestore(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(snap)
 }
 
-// objectStore is the minimal DataNode storage interface (avoids import cycle with s3api).
-type objectStore interface {
-	PutObject(bucket, key string, contentType string, meta map[string]string, r io.Reader) (objectMeta, error)
-	GetObject(bucket, key string) (objectMeta, io.ReadCloser, error)
-	HeadObject(bucket, key string) (objectMeta, error)
+// ObjectAPI is the minimal DataNode storage interface (avoids import cycle with s3api).
+// It is exported so that packages such as s3api can implement DiskResolver.
+type ObjectAPI interface {
+	PutObject(bucket, key string, contentType string, meta map[string]string, r io.Reader) (ObjectInfo, error)
+	GetObject(bucket, key string) (ObjectInfo, io.ReadCloser, error)
+	HeadObject(bucket, key string) (ObjectInfo, error)
 	DeleteObject(bucket, key string) error
-	ListObjectsV2(bucket, prefix, delimiter, continuationToken string, maxKeys int) (objectListResult, error)
+	ListObjectsV2(bucket, prefix, delimiter, continuationToken string, maxKeys int) (ObjectListing, error)
 }
-type objectMeta struct {
-	ETag, ContentType string
-	Meta              map[string]string
+
+type objectStore = ObjectAPI
+
+// DiskResolver is optionally implemented by a store that manages several disks.
+// Disk returns the store for one configured disk path, creating the bucket on
+// that disk if needed. It must reject paths that are not configured disks.
+type DiskResolver interface {
+	Disk(path, bucket string) (ObjectAPI, error)
 }
-type objectListResult struct {
-	Objects        []objectMeta
-	CommonPrefixes []string
+
+// ObjectInfo is the object metadata exchanged with the DataNode object API.
+// Field names match s3api.ObjectMeta because RemoteStore decodes the JSON list
+// response into that type. It is exported so that other packages can implement
+// the store interface (the unexported types made that impossible).
+type ObjectInfo struct {
+	Key         string
+	Size        int64
+	ETag        string
+	ContentType string
+	LastMod     time.Time
+	Meta        map[string]string
+}
+
+// ObjectListing is the result of a bucket-level listing. When IsTruncated is
+// true, NextContinuationToken is the token to pass to get the next page.
+type ObjectListing struct {
+	Objects               []ObjectInfo
+	CommonPrefixes        []string
+	IsTruncated           bool
+	NextContinuationToken string
 }
 
 func (h *Handler) tryStore() (objectStore, bool) {
@@ -337,6 +362,20 @@ func (h *Handler) handleObjects(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 2 {
 		key, _ = url.PathUnescape(parts[1])
 	}
+	// ?disk=<path> selects one of the DataNode's configured disks (set by the placement engine).
+	if disk := r.URL.Query().Get("disk"); disk != "" && bucket != "" {
+		dr, isResolver := h.store.(DiskResolver)
+		if !isResolver {
+			http.Error(w, "DataNode has no multi-disk support", http.StatusBadRequest)
+			return
+		}
+		ds, err := dr.Disk(disk, bucket)
+		if err != nil {
+			http.Error(w, "invalid disk: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		s = ds
+	}
 	// Bucket-level list: GET /internal/objects/{bucket}?prefix=&delimiter=&continuation-token=&max-keys=
 	if r.Method == http.MethodGet && key == "" {
 		q := r.URL.Query()
@@ -354,7 +393,12 @@ func (h *Handler) handleObjects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"objects": res.Objects, "prefixes": res.CommonPrefixes})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"objects":                 res.Objects,
+			"prefixes":                res.CommonPrefixes,
+			"is_truncated":            res.IsTruncated,
+			"next_continuation_token": res.NextContinuationToken,
+		})
 		return
 	}
 	switch r.Method {

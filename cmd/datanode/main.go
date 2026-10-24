@@ -67,22 +67,32 @@ func main() {
 		fmt.Fprintf(os.Stderr, "datanode: invalid config: %v\n", vErr)
 		os.Exit(1)
 	}
-	// DataNode local storage for gateway objects: use first Datanode path or fallback
+	// DataNode local storage for gateway objects: one store per configured disk.
+	// The first usable disk is the default for requests without ?disk=.
 	var store s3api.ObjectStore
-	storePath := ""
-	if len(cfg.Datanode.Paths) > 0 {
-		storePath = cfg.Datanode.Paths[0]
+	disks := make(map[string]s3api.ObjectStore)
+	storePaths := cfg.Datanode.Paths
+	if len(storePaths) == 0 {
+		storePaths = []string{filepath.Join("/var/lib/mirymesh", "data")}
 	}
-	if storePath == "" {
-		storePath = filepath.Join("/var/lib/mirymesh", "data")
-	}
-	if err := os.MkdirAll(storePath, 0o750); err == nil {
-		if s, sErr := s3api.NewStorage(storePath); sErr == nil {
-			store = s
-			slog.Info("datanode: local store", "path", storePath)
-		} else {
-			slog.Warn("datanode: local store init failed", "err", sErr)
+	for _, p := range storePaths {
+		if strings.TrimSpace(p) == "" {
+			continue
 		}
+		if err := os.MkdirAll(p, 0o750); err != nil {
+			slog.Warn("datanode: local store path unusable", "path", p, "err", err)
+			continue
+		}
+		s, sErr := s3api.NewStorage(p)
+		if sErr != nil {
+			slog.Warn("datanode: local store init failed", "path", p, "err", sErr)
+			continue
+		}
+		disks[filepath.Clean(p)] = s
+		if store == nil {
+			store = s
+		}
+		slog.Info("datanode: local store", "path", p)
 	}
 	agent := datanode.NewAgent(cfg)
 	// Serve DataNode internal API including /internal/objects/* for gateway
@@ -92,7 +102,13 @@ func main() {
 	if len(cfg.Auth.Credentials) > 0 {
 		token = cfg.Auth.Credentials[0].SecretKey
 	}
-	dnHandler := datanode.NewHandlerWithObjects(reg, token, store)
+	// Wrap only a non-nil store: a typed adapter around nil would defeat the
+	// handler's "storage not configured" check.
+	var objects interface{}
+	if store != nil {
+		objects = s3api.NewDataNodeStoreWithDisks(store, disks)
+	}
+	dnHandler := datanode.NewHandlerWithObjects(reg, token, objects)
 	dnHandler.RegisterRoutes(mux)
 	// Persist the controller-issued node token so restarts don't need a new pair token.
 	tokenDir := cfg.Server.DataDir

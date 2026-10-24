@@ -66,6 +66,8 @@ func (h *Handler) handleBucketSub(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
+			// Placement rules and disk reservations go with the bucket too.
+			h.forgetPlacement(bucket)
 			// Grants must not outlive the bucket: a bucket re-created under the same name starts clean.
 			if err := h.userMgr.RemoveBucket(bucket); err != nil {
 				slog.Warn("admin: remove user grants of deleted bucket", "bucket", bucket, "err", err)
@@ -86,6 +88,10 @@ func (h *Handler) handleBucketSub(w http.ResponseWriter, r *http.Request) {
 	}
 	if parts[1] == "quota" {
 		h.handleBucketQuota(w, r, bucket)
+		return
+	}
+	if parts[1] == "placement" {
+		h.handleBucketPlacement(w, r, bucket)
 		return
 	}
 	if parts[1] == "domains" {

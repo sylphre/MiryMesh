@@ -260,6 +260,8 @@ func main() {
 	adminHandler.SetUpdateChecker(updateChecker)
 	// The notification channel chosen in the console (stored in the DB) overrides the install default.
 	adminHandler.LoadUpdateSettings()
+	// Per-bucket placement rules and dedicated disks saved from the console.
+	adminHandler.LoadPlacementState()
 	updateChecker.Start()
 	slog.Info("controller: version", "version", version.Version, "update_check", updateOn, "prerelease", updatePre)
 	s3api.SetMetricsRecorder(func(isGet bool, bytes int64) {
