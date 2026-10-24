@@ -58,7 +58,7 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 このコマンドは次の処理を行います。
 
 - リリースから静的リンクの `mirymesh-datanode` をダウンロードし、sha256 を検証して `/usr/local/bin` に入れます。この場合、Go も git も不要です。
-- リリースに該当ファイルが無いときは、ソースビルドに自動で切り替わります（git と Go が必要）。`release` ブランチへの merge で release ワークフローが走るまでは、この経路になります。
+- リリースに該当ファイルが無いときは、ソースビルドに自動で切り替わります（git と Go が必要）。`prerelease` / `release` ブランチへの merge で release ワークフローが走るまでは、この経路になります。
 - `mirymesh` ユーザー、`/etc/mirymesh/config.yaml`、systemd ユニットを作ります。
 - `--path` のディレクトリを `mirymesh` の所有にして、サービスから書き込めるようにします。ユニットは `ProtectSystem=strict` なので、指定しないと書けません。
 - ワンタイムトークンで Master に登録し、成功したらトークンをこのサーバーから消します。以降の再起動には保存済みのノードトークンが使われます。
@@ -83,7 +83,8 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 | `--release` / `--version TAG` | リリースのバイナリを使う / タグを固定する（`--client` の既定は `--release`） |
 | `--from-source` / `--deb` / `--rpm` | ソースビルド（`--master` の既定）/ DEB / RPM から入れる |
 | `--dev` | Dev。ソースからビルドして入れる（`--client` でも使えます） |
-| `--branch NAME` | ソースビルドに使うブランチ（既定 `release`。`--version TAG` を付けた場合はそちらが優先） |
+| `--branch NAME` | ソースビルドに使うブランチ（既定 `release`、`--prerelease` のときは `prerelease`。`--version TAG` を付けた場合はそちらが優先） |
+| `--prerelease` / `--channel release\|prerelease` | prerelease チャンネルに乗る（rc を含む最新リリース、ソースビルドは `prerelease` ブランチ）。`--update` はいまのチャンネルを引き継ぎ、安定版に戻すときは `--channel release` を付ける |
 | `--no-enable` | インストールだけして起動しない |
 | `--skip-db-check` | Master の DB 有無チェックを飛ばす |
 | `--update` | 入っている MiryMesh をその場で更新する（役割は自動判定、設定とデータは保持） |
@@ -94,7 +95,7 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 
 すでに MiryMesh が入っているホストで `--master` / `--client` を付けずに実行すると、役割などは聞かず「更新しますか？」だけを聞きます。Dev ビルドで更新するときは `--update --dev [--branch NAME]` を付けます。入れ直したいときは `--master` / `--client` を付けて実行します。
 
-まだ入っていないホストで `--master` / `--client` を付けずに実行すると、役割、インストール方法（Release または Dev）、Master の URL、ペアリングトークン、保存先を順に聞き、最後に内容を確認します。Release は `--client` ならビルド済みの DataNode、`--master` なら `release` ブランチからのソースビルドです。Dev はソースからビルドし、ブランチを指定できます（既定は `release`）。`curl ... | sudo bash` のようにパイプで渡した場合も、端末（`/dev/tty`）から読みます。聞かれたくないとき（自動化など）は `--yes` を付けます。
+まだ入っていないホストで `--master` / `--client` を付けずに実行すると、役割、インストール方法（Release / Prerelease / Dev）、Master の URL、ペアリングトークン、保存先を順に聞き、最後に内容を確認します。Release は `--client` ならビルド済みの DataNode、`--master` なら `release` ブランチからのソースビルドです。Prerelease は rc を含む最新リリース（`--master` なら `prerelease` ブランチ）を入れます。Dev はソースからビルドし、ブランチを指定できます（既定は `release`）。`curl ... | sudo bash` のようにパイプで渡した場合も、端末（`/dev/tty`）から読みます。聞かれたくないとき（自動化など）は `--yes` を付けます。
 
 #### 更新する
 
@@ -107,6 +108,20 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 - **DataNode:** **Nodes** 画面の Version 列が Master と違うノードに「更新」ボタンが出ます。押すと、DataNode がリリースから静的バイナリをダウンロードして sha256 を検証し、終了します。systemd が再起動する前に、root 権限のヘルパー（`/usr/local/lib/mirymesh/apply-update.sh`）がバイナリを差し替えます。直前のバイナリは `<バイナリ>.prev` に残ります。
 - ワンクリック更新を使うには、各 DataNode で `install.sh --update` を 1 回実行して有効化します。それ以降は Master から更新できます。無効のままにしたいときは `--no-self-update` を付けます。
 - 安定版のリリースがまだ無い間は、最新のプレリリースを使います。
+- チャンネルは `/etc/mirymesh/channel` に記録されます。`--update` は、入っているバージョンに `-rc.1` のような接尾辞があるか、このファイルが `prerelease` のときに prerelease チャンネルとして更新します。prerelease チャンネルの Master は、更新のお知らせにも rc を出します（`MIRYMESH_UPDATE_PRERELEASE=1`）。
+
+#### ブランチとリリースの流れ
+
+`dev` → `prerelease` → `release` の順に PR を作って merge します。release ワークフローは、merge 先のブランチでリリースの種類を決めます。
+
+| merge 先 | 公開されるもの | バージョンの例 |
+| --- | --- | --- |
+| `prerelease` | GitHub の Pre-release（rc） | `v1.0.0-rc.1` |
+| `release` | 通常のリリース（latest） | `v1.0.0` |
+
+- バージョンは merge コミットのメッセージ（squash merge なら PR タイトル）から読み取ります。
+- ブランチとバージョンの接尾辞が合わない場合（`release` に `v1.0.0-rc.1`、`prerelease` に `v1.0.0` など）は、公開せずにワークフローを失敗させます。
+- メッセージに `dev` や `rc` の語があるかどうかは見なくなりました。
 
 ### その他のインストール方法
 

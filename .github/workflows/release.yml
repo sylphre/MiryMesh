@@ -2,15 +2,17 @@
 # Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
 # MiryMesh release workflow.
 #
-# Runs when something is merged (pushed) into the `release` branch.
-#   - The version tag (e.g. v1.0.0 / v1.0.0-rc.1) is taken from the merge commit message.
-#   - If the message contains the word beta, dev or rc (case-insensitive) the GitHub Release
-#     is published as a PRE-RELEASE. Otherwise it is published as a normal (latest) release.
+# Branch flow: dev > prerelease > release. Open a PR dev -> prerelease and merge it; later
+# open a PR prerelease -> release.
+#   - A merge (push) into `prerelease` publishes a GitHub PRE-RELEASE (version such as v1.0.0-rc.1).
+#   - A merge (push) into `release` publishes a normal (latest) release (version such as v1.0.0).
+#   - The version tag is taken from the merge commit message (the PR title for a squash merge).
+#   - The version suffix must match the branch, otherwise the run fails before anything is published.
 #   - workflow_dispatch builds everything but never publishes (dry run).
 name: release
 on:
   push:
-    branches: [release]
+    branches: [prerelease, release]
   workflow_dispatch:
     inputs:
       tag:
@@ -37,6 +39,7 @@ jobs:
         env:
           INPUT_TAG: ${{ github.event.inputs.tag }}
           EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           msg="$(git log -1 --format=%B "$GITHUB_SHA")"
@@ -50,24 +53,33 @@ jobs:
           fi
           case "$ver" in v*) ;; *) ver="v$ver" ;; esac
 
-          # beta / dev / rc as a standalone word (not "develop", "device", "src", ...)
-          if printf '%s' "$src" | grep -qiE '(^|[^[:alpha:]])(beta|dev|rc)([^[:alpha:]]|$)'; then
-            pre=true
-          else
-            pre=false
-          fi
-
-          # The tag and the message must agree, otherwise the updater would mis-classify the release.
           case "$ver" in
             *-*) has_suffix=true ;;
             *) has_suffix=false ;;
           esac
+
+          # The branch decides the release type: prerelease -> GitHub pre-release, release -> normal release.
+          # A manual run is a dry run that can start from any branch, so it follows the version suffix.
+          if [ "$EVENT_NAME" = push ]; then
+            case "$REF_NAME" in
+              prerelease) pre=true ;;
+              release) pre=false ;;
+              *)
+                echo "::error::Branch $REF_NAME is not a release branch (expected prerelease or release)."
+                exit 1
+                ;;
+            esac
+          else
+            pre="$has_suffix"
+          fi
+
+          # The version must match the branch, otherwise the updater would mis-classify the release.
           if [ "$pre" = true ] && [ "$has_suffix" = false ]; then
-            echo "::error::Message mentions beta/dev/rc but version $ver has no pre-release suffix (e.g. ${ver}-rc.1)."
+            echo "::error::Branch prerelease needs a pre-release version such as ${ver}-rc.1, but the merge message has $ver."
             exit 1
           fi
           if [ "$pre" = false ] && [ "$has_suffix" = true ]; then
-            echo "::error::Version $ver has a pre-release suffix but the message does not contain beta, dev or rc."
+            echo "::error::Branch release needs a stable version such as v1.0.0, but the merge message has $ver. Pre-release versions go through the prerelease branch."
             exit 1
           fi
 
