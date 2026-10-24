@@ -205,6 +205,21 @@ if [ -z "$UPDATE" ] && [ -z "$ROLE" ] && [ -n "$INSTALLED_ROLE" ] && interactive
   printf "MiryMesh is already installed on this host (role: %s%s).\n" "$INSTALLED_ROLE" "${_v:+, $_v}"
   ask ans "Update it now? (Y/n)" "Y"
   case "$ans" in n|N|no|NO) die "aborted" ;; esac
+  # Where to update to. This is also how a Dev (source) build moves to Prerelease or Release.
+  # Skipped when --channel / --prerelease / --dev / --branch already said it.
+  if [ -z "$CHANNEL" ] && [ -z "$MODE" ] && [ -z "$BRANCH" ]; then
+    case "$(detect_installed_channel)" in prerelease) _cd=2 ;; *) _cd=1 ;; esac
+    printf "Update to — 1) Release (stable)  2) Prerelease (rc)  3) Dev (build a branch from source)\n"
+    ask ans "Select 1, 2 or 3" "$_cd"
+    case "$ans" in
+      2|pre|prerelease|Prerelease|p|P) CHANNEL="prerelease" ;;
+      3|dev|Dev|DEV|d|D)
+        MODE="from-source"
+        ask BRANCH "Branch to build" "release"
+        ;;
+      *) CHANNEL="release" ;;
+    esac
+  fi
   UPDATE=1; ASSUME_YES=1; SKIP_DB_CHECK=1; HAVE_TTY=""
 fi
 

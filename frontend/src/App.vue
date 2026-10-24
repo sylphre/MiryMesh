@@ -88,8 +88,16 @@ function dismissUpdate() {
 
 let updateTimer = null
 watch(bare, (isBare) => { if (!isBare) loadUpdate() }, { immediate: true })
-onMounted(() => { updateTimer = setInterval(loadUpdate, 30 * 60 * 1000) })
-onBeforeUnmount(() => { if (updateTimer) clearInterval(updateTimer) })
+// Settings.vue fires this after the notification channel changes, so the banner updates at once.
+const UPDATE_CHANGED_EVENT = 'mirymesh:update-changed'
+onMounted(() => {
+  updateTimer = setInterval(loadUpdate, 30 * 60 * 1000)
+  window.addEventListener(UPDATE_CHANGED_EVENT, loadUpdate)
+})
+onBeforeUnmount(() => {
+  if (updateTimer) clearInterval(updateTimer)
+  window.removeEventListener(UPDATE_CHANGED_EVENT, loadUpdate)
+})
 </script>
 
 <template>

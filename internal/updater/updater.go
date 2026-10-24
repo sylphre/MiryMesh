@@ -30,18 +30,53 @@ const (
 	maxNotes   = 4000
 )
 
+// Notification channels. ChannelAuto follows the install (a pre-release or dev build,
+// or MIRYMESH_UPDATE_PRERELEASE=1, also offers pre-releases). The other two are an
+// explicit choice made in the console and override that.
+const (
+	ChannelAuto       = ""
+	ChannelRelease    = "release"
+	ChannelPrerelease = "prerelease"
+)
+
+// ParseChannel normalizes a user supplied channel name ("auto", "release", "prerelease").
+// ok is false for anything else.
+func ParseChannel(s string) (channel string, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "auto":
+		return ChannelAuto, true
+	case "release", "stable":
+		return ChannelRelease, true
+	case "prerelease", "pre":
+		return ChannelPrerelease, true
+	}
+	return "", false
+}
+
+// ChannelName is the name used in the API and the database ("auto" for ChannelAuto).
+func ChannelName(channel string) string {
+	if channel == ChannelAuto {
+		return "auto"
+	}
+	return channel
+}
+
 // Status is what the admin API returns to the console.
+// NotifyChannel is the saved setting (auto, release or prerelease) and
+// IncludePrerelease is what that setting means for this Master right now.
 type Status struct {
-	Enabled         bool      `json:"enabled"`
-	Current         string    `json:"current"`
-	Latest          string    `json:"latest,omitempty"`
-	UpdateAvailable bool      `json:"update_available"`
-	Prerelease      bool      `json:"prerelease,omitempty"`
-	ReleaseURL      string    `json:"release_url,omitempty"`
-	Notes           string    `json:"notes,omitempty"`
-	PublishedAt     time.Time `json:"published_at,omitzero"`
-	CheckedAt       time.Time `json:"checked_at,omitzero"`
-	Error           string    `json:"error,omitempty"`
+	Enabled           bool      `json:"enabled"`
+	Current           string    `json:"current"`
+	Latest            string    `json:"latest,omitempty"`
+	UpdateAvailable   bool      `json:"update_available"`
+	Prerelease        bool      `json:"prerelease,omitempty"`
+	ReleaseURL        string    `json:"release_url,omitempty"`
+	Notes             string    `json:"notes,omitempty"`
+	PublishedAt       time.Time `json:"published_at,omitzero"`
+	CheckedAt         time.Time `json:"checked_at,omitzero"`
+	Error             string    `json:"error,omitempty"`
+	IncludePrerelease bool      `json:"include_prerelease"`
+	NotifyChannel     string    `json:"notify_channel"`
 }
 
 type release struct {
@@ -66,11 +101,13 @@ type Checker struct {
 	mu      sync.RWMutex
 	status  Status
 	last    time.Time // last attempt, successful or not
+	channel string    // ChannelAuto, ChannelRelease or ChannelPrerelease
 }
 
 // New creates a Checker. When enabled is false it never contacts GitHub.
-// Pre-releases are offered when prerelease is true, or when current is itself
-// a pre-release or not a release version (a "dev" build).
+// With the default (auto) channel, pre-releases are offered when prerelease is true,
+// or when current is itself a pre-release or not a release version (a "dev" build).
+// SetChannel overrides that.
 func New(current string, enabled, prerelease bool) *Checker {
 	return &Checker{
 		current:    current,
@@ -83,11 +120,48 @@ func New(current string, enabled, prerelease bool) *Checker {
 	}
 }
 
+// SetChannel chooses whether pre-releases are offered (ChannelPrerelease), hidden
+// (ChannelRelease) or decided by the install (ChannelAuto). The next Check looks the
+// release up again instead of answering from the cache.
+func (c *Checker) SetChannel(channel string) {
+	c.fetchMu.Lock() // wait for a running lookup so its result cannot outlive the change
+	defer c.fetchMu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.channel = channel
+	c.last = time.Time{}
+}
+
+// includePreLocked reports whether pre-releases are offered. The caller holds c.mu.
+func (c *Checker) includePreLocked() bool {
+	switch c.channel {
+	case ChannelPrerelease:
+		return true
+	case ChannelRelease:
+		return false
+	}
+	return c.prerelease || version.IsPrerelease(c.current) || !version.Valid(c.current)
+}
+
+func (c *Checker) includePre() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.includePreLocked()
+}
+
+// decorate fills the fields that depend on the notification setting. The caller holds c.mu.
+func (c *Checker) decorate(st *Status) {
+	st.NotifyChannel = ChannelName(c.channel)
+	st.IncludePrerelease = c.includePreLocked()
+}
+
 // Status returns the last known result.
 func (c *Checker) Status() Status {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.status
+	st := c.status
+	c.decorate(&st)
+	return st
 }
 
 // Start runs the background check: once shortly after boot, then every interval.
@@ -127,6 +201,7 @@ func (c *Checker) Check(ctx context.Context) Status {
 	defer c.mu.Unlock()
 	c.last = now
 	st := c.status
+	c.decorate(&st)
 	st.CheckedAt = now
 	if err != nil {
 		st.Error = err.Error()
@@ -169,7 +244,7 @@ func (c *Checker) latest(ctx context.Context) (*release, error) {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&list); err != nil {
 		return nil, fmt.Errorf("release lookup returned invalid JSON: %w", err)
 	}
-	includePre := c.prerelease || version.IsPrerelease(c.current) || !version.Valid(c.current)
+	includePre := c.includePre()
 	var best *release
 	for i := range list {
 		r := &list[i]

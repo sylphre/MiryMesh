@@ -42,7 +42,7 @@ func TestMigrateMySQL(t *testing.T) {
 		t.Fatalf("schema_migrations rows=%d want %d", applied, want)
 	}
 
-	for _, table := range []string{"setup", "sessions", "pair_tokens", "buckets", "objects", "placement", "s3_subresources", "users", "user_bucket_perms"} {
+	for _, table := range []string{"setup", "sessions", "pair_tokens", "buckets", "objects", "placement", "s3_subresources", "users", "user_bucket_perms", "app_settings"} {
 		var n int
 		err := db.QueryRow(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?`, table).Scan(&n)
 		if err != nil || n != 1 {

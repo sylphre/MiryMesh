@@ -116,6 +116,9 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 - 安定版のリリースがまだ無い間は、最新のプレリリースを使います。
 - チャンネルは `/etc/mirymesh/channel` に記録されます。`--update` は、入っているバージョンに `-rc.1` のような接尾辞があるか、このファイルが `prerelease` のときに prerelease チャンネルとして更新します。prerelease チャンネルの Master は、更新のお知らせにも rc を出します（`MIRYMESH_UPDATE_PRERELEASE=1`）。
 
+- **Dev ビルドから上げる:** ソースからビルドした（Dev）ホストを Release / Prerelease に移すには、`--update --channel release` または `--update --prerelease` を付けて実行します。`--update` を付けずに対話式で実行した場合は、更新の前に Release / Prerelease / Dev を選べます。Master は選んだチャンネルのブランチ（`release` / `prerelease`）から入れ直し、DataNode は配布済みバイナリを入れます。設定とデータは保持されます。
+- **更新のお知らせの対象:** Master の **Settings** 画面の「更新のお知らせ」で、安定版のみ / プレリリースも / インストールのチャンネルに従う、を選べます。選んだ値は DB に保存され、`install.sh` のチャンネルや `MIRYMESH_UPDATE_PRERELEASE` より優先されます。「インストールのチャンネルに従う」を選ぶと従来の挙動に戻ります。
+
 #### ブランチとリリースの流れ
 
 `dev` → `prerelease` → `release` の順に PR を作って merge します。release ワークフローは、merge 先のブランチでリリースの種類を決めます。

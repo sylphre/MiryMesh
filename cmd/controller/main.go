@@ -258,6 +258,8 @@ func main() {
 	updatePre := version.IsPrerelease(version.Version) || os.Getenv("MIRYMESH_UPDATE_PRERELEASE") == "1"
 	updateChecker := updater.New(version.Version, updateOn, updatePre)
 	adminHandler.SetUpdateChecker(updateChecker)
+	// The notification channel chosen in the console (stored in the DB) overrides the install default.
+	adminHandler.LoadUpdateSettings()
 	updateChecker.Start()
 	slog.Info("controller: version", "version", version.Version, "update_check", updateOn, "prerelease", updatePre)
 	s3api.SetMetricsRecorder(func(isGet bool, bytes int64) {

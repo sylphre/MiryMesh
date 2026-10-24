@@ -75,6 +75,7 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, cfg conf
 	// Release notice (Master) and Master-triggered DataNode update
 	adminG.GET("/update", ginWrapAuth(h, h.HandleUpdateInfo))
 	adminG.POST("/update/check", ginWrapAuth(h, h.HandleUpdateCheck))
+	adminG.PUT("/update/settings", ginWrapAuth(h, h.HandleUpdateSettings))
 	adminG.POST("/nodes/update", ginWrapAuth(h, h.HandleNodeUpdate))
 	adminG.GET("/config", ginWrap(h.HandleConfig))
 	adminG.PUT("/config/policy", ginWrapAuth(h, h.HandleConfigPolicy))

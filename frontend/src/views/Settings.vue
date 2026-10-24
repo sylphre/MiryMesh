@@ -32,6 +32,46 @@ onMounted(async () => {
   }
 })
 
+// Update notice: which releases the banner offers. Stored on the Master, applies at once.
+const CHANNELS = [
+  { value: 'release', title: '安定版のみ', desc: 'Release だけ通知' },
+  { value: 'prerelease', title: 'プレリリースも', desc: 'rc などの Pre-release も通知' },
+  { value: 'auto', title: 'インストールに従う', desc: 'install.sh のチャンネルと現在のビルドで決定' },
+]
+const notify = ref('auto')
+const notifyLoading = ref(true)
+const notifySaving = ref(false)
+const updateInfo = ref(null)
+
+async function loadNotify() {
+  try {
+    const j = await api('/api/admin/update', { redirectOn401: false })
+    updateInfo.value = j
+    notify.value = (j && j.notify_channel) || 'auto'
+  } catch (e) {
+    toastErr(e)
+  } finally {
+    notifyLoading.value = false
+  }
+}
+
+async function saveNotify() {
+  notifySaving.value = true
+  try {
+    const j = await api('/api/admin/update/settings', { method: 'PUT', body: { notify_channel: notify.value } })
+    updateInfo.value = j
+    notify.value = (j && j.notify_channel) || notify.value
+    window.dispatchEvent(new Event('mirymesh:update-changed'))
+    toastOk('更新のお知らせの設定を保存しました')
+  } catch (e) {
+    toastErr(e)
+  } finally {
+    notifySaving.value = false
+  }
+}
+
+onMounted(loadNotify)
+
 async function save() {
   saving.value = true
   try {
@@ -92,6 +132,39 @@ async function genCreds() {
       <div class="card__foot" style="justify-content: flex-end">
         <button type="button" class="btn btn--primary" :disabled="loading || saving" @click="save">
           <span v-if="saving" class="spinner" aria-hidden="true"></span>Save
+        </button>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="upd-title">
+      <div class="card__head"><h2 id="upd-title" class="card__title">更新のお知らせ</h2></div>
+      <div class="card__body stack">
+        <p class="muted">画面上部のお知らせに、どのリリースを出すかを選びます。DataNode の更新先は変わりません。</p>
+        <div v-if="notifyLoading" class="skeleton" style="height: 64px"></div>
+        <template v-else>
+          <fieldset style="border: 0; margin: 0; padding: 0">
+            <legend class="sr-only">更新のお知らせの対象</legend>
+            <div class="choices">
+              <label v-for="c in CHANNELS" :key="c.value" class="choice" :class="{ 'choice--on': notify === c.value }">
+                <input v-model="notify" type="radio" name="notify-channel" :value="c.value" />
+                <span class="choice__title">{{ c.title }}</span>
+                <span class="choice__desc">{{ c.desc }}</span>
+              </label>
+            </div>
+          </fieldset>
+          <p v-if="updateInfo" class="muted">
+            現在 {{ updateInfo.current || '-' }}
+            <template v-if="updateInfo.latest"> / 最新 {{ updateInfo.latest }}</template>
+            ・プレリリース: {{ updateInfo.include_prerelease ? '通知する' : '通知しない' }}
+          </p>
+          <p v-if="updateInfo && updateInfo.enabled === false" class="muted">
+            更新の確認は環境変数 MIRYMESH_UPDATE_CHECK で無効になっているため、設定は保存されますが通知は出ません。
+          </p>
+        </template>
+      </div>
+      <div class="card__foot" style="justify-content: flex-end">
+        <button type="button" class="btn btn--primary" :disabled="notifyLoading || notifySaving" @click="saveNotify">
+          <span v-if="notifySaving" class="spinner" aria-hidden="true"></span>Save
         </button>
       </div>
     </section>

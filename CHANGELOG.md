@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 - `install.sh` (Master) can choose between PostgreSQL and MySQL/MariaDB when both are installed: an interactive prompt, `--db-driver postgres|mysql`, or PostgreSQL with `--yes`. New `--db-user`, `--db-name` and `--db-password` options.
 - `install.sh` creates the MySQL/MariaDB user and database (root socket login) and hands the DSN to the controller, the same as it does for PostgreSQL.
+- Update notice channel: the Settings page has an "更新のお知らせ" card to choose stable releases only, pre-releases too, or "follow the install" (the previous behavior, still the default). The choice is stored in the database (`app_settings`, migration `0005`), applies at once, and survives restarts. API: `PUT /api/admin/update/settings` with `{"notify_channel": "auto|release|prerelease"}`. `GET /api/admin/update` now also returns `notify_channel` and `include_prerelease`.
+- `install.sh`: an interactive run on a host that already has MiryMesh asks where to update to: Release, Prerelease or Dev (branch). This is how a Dev source build moves to Prerelease or Release. `--update --channel release|prerelease` does the same without prompts.
 
 ### Fixed
 - `install.sh` created the PostgreSQL role but not the database. `CREATE USER` and `CREATE DATABASE` ran in one `psql -c`, which PostgreSQL rejects (`CREATE DATABASE` cannot run in a transaction block), and `2>/dev/null` hid the error. Each statement now runs separately, errors are printed, and the installer checks that it can log in over `127.0.0.1` with the new password. A rerun resets the password of an existing role instead of failing.
