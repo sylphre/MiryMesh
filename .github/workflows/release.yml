@@ -1,18 +1,27 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
-# MiryMesh release workflow — master development line.
+# MiryMesh release workflow.
+#
+# Runs when something is merged (pushed) into the `release` branch.
+#   - The version tag (e.g. v1.0.0 / v1.0.0-rc.1) is taken from the merge commit message.
+#   - If the message contains the word beta, dev or rc (case-insensitive) the GitHub Release
+#     is published as a PRE-RELEASE. Otherwise it is published as a normal (latest) release.
+#   - workflow_dispatch builds everything but never publishes (dry run).
 name: release
 on:
   push:
-    tags: ["v*"]
+    branches: [release]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v0.1.0)"
+        description: "Version to build, e.g. v0.1.0 or v0.1.0-rc.1 (dry run, nothing is published)"
         required: false
 permissions:
   contents: write
   packages: write
+concurrency:
+  group: release
+  cancel-in-progress: false
 jobs:
   release:
     runs-on: ubuntu-24.04
@@ -24,14 +33,54 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
-      - name: release version
+      - name: decide version and release type
         env:
           INPUT_TAG: ${{ github.event.inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          v="${INPUT_TAG:-$GITHUB_REF_NAME}"
-          case "$v" in v[0-9]*.[0-9]*.[0-9]*) ;; *) v="dev" ;; esac
-          echo "RELEASE_VERSION=$v" >> "$GITHUB_ENV"
-          echo "version: $v"
+          set -euo pipefail
+          msg="$(git log -1 --format=%B "$GITHUB_SHA")"
+          src="${INPUT_TAG:-$msg}"
+
+          # First semver-looking token: 1.2.3 / v1.2.3 / v1.2.3-rc.1
+          ver="$(printf '%s' "$src" | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?' | head -n1 || true)"
+          if [ -z "$ver" ]; then
+            echo "::error::No version (e.g. v1.0.0 or v1.0.0-rc.1) found in the merge message. Put the version in the merge commit message / PR title."
+            exit 1
+          fi
+          case "$ver" in v*) ;; *) ver="v$ver" ;; esac
+
+          # beta / dev / rc as a standalone word (not "develop", "device", "src", ...)
+          if printf '%s' "$src" | grep -qiE '(^|[^[:alpha:]])(beta|dev|rc)([^[:alpha:]]|$)'; then
+            pre=true
+          else
+            pre=false
+          fi
+
+          # The tag and the message must agree, otherwise the updater would mis-classify the release.
+          case "$ver" in
+            *-*) has_suffix=true ;;
+            *) has_suffix=false ;;
+          esac
+          if [ "$pre" = true ] && [ "$has_suffix" = false ]; then
+            echo "::error::Message mentions beta/dev/rc but version $ver has no pre-release suffix (e.g. ${ver}-rc.1)."
+            exit 1
+          fi
+          if [ "$pre" = false ] && [ "$has_suffix" = true ]; then
+            echo "::error::Version $ver has a pre-release suffix but the message does not contain beta, dev or rc."
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" = push ]; then
+            if git rev-parse -q --verify "refs/tags/$ver" >/dev/null; then
+              echo "::error::Tag $ver already exists. Use a new version."
+              exit 1
+            fi
+          fi
+
+          echo "RELEASE_VERSION=$ver" >> "$GITHUB_ENV"
+          echo "IS_PRERELEASE=$pre" >> "$GITHUB_ENV"
+          echo "version: $ver (prerelease: $pre)"
       - name: build binaries
         run: |
           LDF="-X github.com/sylphre/MiryMesh/internal/version.Version=$RELEASE_VERSION"
@@ -58,17 +107,30 @@ jobs:
           file: packaging/docker/Dockerfile
           push: false
           load: true
-          tags: mirymesh:${{ github.ref_name }}
+          tags: mirymesh:${{ env.RELEASE_VERSION }}
           build-args: VERSION=${{ env.RELEASE_VERSION }}
-      - name: gh release create (dry-run if manual dispatch without tag)
+      - name: verify LICENSE bundled
+        run: test -f LICENSE && head -1 LICENSE | grep -q "AFFERO" && echo "LICENSE ok (AGPL-3.0-only)"
+      - name: gh release create
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            gh release create "${{ github.ref_name }}" mirymesh.deb mirymesh.rpm dist-bin/mirymesh-datanode-linux-amd64 dist-bin/mirymesh-datanode-linux-arm64 dist-bin/SHA256SUMS --title "${{ github.ref_name }}" --notes "See CHANGELOG.md — LICENSE AGPL-3.0-only bundled" || true
+          set -euo pipefail
+          args=(--target "$GITHUB_SHA" --title "$RELEASE_VERSION" --generate-notes)
+          if [ "$IS_PRERELEASE" = true ]; then
+            args+=(--prerelease)
           else
-            echo "manual dispatch: skipping gh release create (no tag)"
-            ls -lh mirymesh.deb mirymesh.rpm
+            args+=(--latest)
           fi
-      - name: verify LICENSE bundled
-        run: test -f LICENSE && head -1 LICENSE | grep -q "AFFERO" && echo "LICENSE ok (AGPL-3.0-only)"
+          gh release create "$RELEASE_VERSION" \
+            mirymesh.deb mirymesh.rpm \
+            dist-bin/mirymesh-datanode-linux-amd64 \
+            dist-bin/mirymesh-datanode-linux-arm64 \
+            dist-bin/SHA256SUMS \
+            "${args[@]}"
+      - name: dry run (no publish)
+        if: github.event_name != 'push'
+        run: |
+          echo "manual dispatch: built $RELEASE_VERSION (prerelease: $IS_PRERELEASE), skipping gh release create"
+          ls -lh mirymesh.deb mirymesh.rpm
