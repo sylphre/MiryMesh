@@ -203,9 +203,9 @@ func TestRemoteStoreMultiNodeRoundTrip(t *testing.T) {
 		if page > total {
 			t.Fatalf("paging did not finish after %d pages", page)
 		}
-		res, err := rs.ListObjectsV2("bkt", "", "", token, 7)
-		if err != nil {
-			t.Fatalf("ListObjectsV2 page %d: %v", page, err)
+		res, pageErr := rs.ListObjectsV2("bkt", "", "", token, 7)
+		if pageErr != nil {
+			t.Fatalf("ListObjectsV2 page %d: %v", page, pageErr)
 		}
 		if len(res.Objects) > 7 {
 			t.Fatalf("page %d has %d objects, max-keys is 7", page, len(res.Objects))
@@ -232,14 +232,14 @@ func TestRemoteStoreMultiNodeRoundTrip(t *testing.T) {
 
 	// DELETE reaches whichever node holds the object.
 	for _, k := range keys[:total/2] {
-		if err := rs.DeleteObject("bkt", k); err != nil {
-			t.Fatalf("DeleteObject(%s): %v", k, err)
+		if delErr := rs.DeleteObject("bkt", k); delErr != nil {
+			t.Fatalf("DeleteObject(%s): %v", k, delErr)
 		}
 		if h := c.holders("bkt", k); len(h) != 0 {
 			t.Fatalf("%s still on %v after delete", k, h)
 		}
-		if _, err := mnGet(rs, "bkt", k); !errors.Is(err, errNoSuchKey) {
-			t.Fatalf("GetObject(%s) after delete: err = %v, want errNoSuchKey", k, err)
+		if _, getErr := mnGet(rs, "bkt", k); !errors.Is(getErr, errNoSuchKey) {
+			t.Fatalf("GetObject(%s) after delete: err = %v, want errNoSuchKey", k, getErr)
 		}
 	}
 	rest, err := rs.ListObjectsV2("bkt", "", "", "", 1000)
