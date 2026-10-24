@@ -81,6 +81,8 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, cfg conf
 	adminG.POST("/nodes/update", ginWrapAuth(h, h.HandleNodeUpdate))
 	adminG.GET("/config", ginWrap(h.HandleConfig))
 	adminG.PUT("/config/policy", ginWrapAuth(h, h.HandleConfigPolicy))
+	adminG.GET("/region", ginWrapAuth(h, h.HandleRegion))
+	adminG.PUT("/region", ginWrapAuth(h, h.HandleRegion))
 
 	// Internal datanode (on admin port as well for simplicity; S3 port also serves /internal)
 	dnHandler := datanode.NewHandler(reg, internalToken)

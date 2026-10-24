@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <!-- Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. -->
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import Icon from '../components/Icon.vue'
 import { api } from '../lib/api.js'
 import { copyText } from '../lib/clipboard.js'
@@ -71,6 +71,67 @@ async function saveNotify() {
 }
 
 onMounted(loadNotify)
+
+// S3 region: reported in X-Amz-Bucket-Region and GetBucketLocation. Stored on the Master, applies at once.
+const REGION_PRESETS = [
+  'us-east-1',
+  'us-east-2',
+  'us-west-1',
+  'us-west-2',
+  'ap-northeast-1',
+  'ap-northeast-2',
+  'ap-northeast-3',
+  'ap-southeast-1',
+  'ap-southeast-2',
+  'ap-south-1',
+  'eu-central-1',
+  'eu-west-1',
+  'eu-west-2',
+  'eu-north-1',
+  'ca-central-1',
+  'sa-east-1',
+]
+const REGION_RE = /^[a-z0-9-]{1,64}$/
+const region = ref('us-east-1')
+const regionSaved = ref('us-east-1')
+const regionDefault = ref('us-east-1')
+const regionPersisted = ref(true)
+const regionLoading = ref(true)
+const regionSaving = ref(false)
+const regionValid = computed(() => REGION_RE.test(region.value.trim()))
+const regionDirty = computed(() => region.value.trim() !== regionSaved.value)
+
+function applyRegion(j) {
+  regionSaved.value = (j && j.region) || regionSaved.value
+  region.value = regionSaved.value
+  regionDefault.value = (j && j.default) || regionDefault.value
+  regionPersisted.value = !j || j.persisted !== false
+}
+
+async function loadRegion() {
+  try {
+    applyRegion(await api('/api/admin/region'))
+  } catch (e) {
+    toastErr(e)
+  } finally {
+    regionLoading.value = false
+  }
+}
+
+async function saveRegion() {
+  if (!regionValid.value) return
+  regionSaving.value = true
+  try {
+    applyRegion(await api('/api/admin/region', { method: 'PUT', body: { region: region.value.trim() } }))
+    toastOk('リージョンを保存しました')
+  } catch (e) {
+    toastErr(e)
+  } finally {
+    regionSaving.value = false
+  }
+}
+
+onMounted(loadRegion)
 
 async function save() {
   saving.value = true
@@ -165,6 +226,62 @@ async function genCreds() {
       <div class="card__foot" style="justify-content: flex-end">
         <button type="button" class="btn btn--primary" :disabled="notifyLoading || notifySaving" @click="saveNotify">
           <span v-if="notifySaving" class="spinner" aria-hidden="true"></span>Save
+        </button>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="region-title">
+      <div class="card__head"><h2 id="region-title" class="card__title">S3 リージョン</h2></div>
+      <div class="card__body stack">
+        <p class="muted">
+          S3 API が <code>X-Amz-Bucket-Region</code> と GetBucketLocation で返すリージョンです。保存するとすぐに反映され、再起動は不要です。
+          署名 (SigV4) はクライアントが指定したリージョンのまま受け付けるため、既存のクライアントは止まりません。
+          クライアント側にも同じリージョンを設定してください。
+        </p>
+        <div v-if="regionLoading" class="skeleton" style="height: 64px"></div>
+        <template v-else>
+          <div class="field">
+            <label class="field__label" for="region-input">リージョン</label>
+            <input
+              id="region-input"
+              v-model="region"
+              class="input input--mono"
+              list="region-presets"
+              maxlength="64"
+              autocomplete="off"
+              spellcheck="false"
+              :aria-invalid="!regionValid"
+              placeholder="us-east-1"
+              @keyup.enter="saveRegion"
+            />
+            <datalist id="region-presets">
+              <option v-for="r in REGION_PRESETS" :key="r" :value="r"></option>
+            </datalist>
+          </div>
+          <p v-if="!regionValid" class="muted" role="alert">英小文字・数字・ハイフンのみ、64 文字以内で入力してください。</p>
+          <p class="muted">
+            現在 {{ regionSaved }}
+            <template v-if="regionSaved !== regionDefault"> (既定: {{ regionDefault }})</template>
+          </p>
+          <p v-if="!regionPersisted" class="muted">データベースが未接続のため、この設定は再起動すると元に戻ります。</p>
+        </template>
+      </div>
+      <div class="card__foot" style="justify-content: flex-end">
+        <button
+          type="button"
+          class="btn"
+          :disabled="regionLoading || regionSaving || region.trim() === regionDefault"
+          @click="region = regionDefault"
+        >
+          既定に戻す
+        </button>
+        <button
+          type="button"
+          class="btn btn--primary"
+          :disabled="regionLoading || regionSaving || !regionValid || !regionDirty"
+          @click="saveRegion"
+        >
+          <span v-if="regionSaving" class="spinner" aria-hidden="true"></span>Save
         </button>
       </div>
     </section>

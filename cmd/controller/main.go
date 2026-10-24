@@ -262,6 +262,9 @@ func main() {
 	adminHandler.LoadUpdateSettings()
 	// Per-bucket placement rules and dedicated disks saved from the console.
 	adminHandler.LoadPlacementState()
+	// The region chosen in the console (stored in the DB) overrides server.region.
+	adminHandler.SetRegionController(s3Router)
+	adminHandler.LoadRegionSetting()
 	updateChecker.Start()
 	slog.Info("controller: version", "version", version.Version, "update_check", updateOn, "prerelease", updatePre)
 	s3api.SetMetricsRecorder(func(isGet bool, bytes int64) {

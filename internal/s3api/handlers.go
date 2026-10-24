@@ -63,7 +63,7 @@ func (rt *Router) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucke
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	w.Header().Set("X-Amz-Bucket-Region", rt.region)
+	w.Header().Set("X-Amz-Bucket-Region", rt.Region())
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -116,7 +116,7 @@ func (rt *Router) handleGetBucketLocation(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(http.StatusOK)
-	_ = xml.NewEncoder(w).Encode(loc{Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/", Location: rt.region})
+	_ = xml.NewEncoder(w).Encode(loc{Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/", Location: rt.Region()})
 }
 
 func (rt *Router) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bucket string) {

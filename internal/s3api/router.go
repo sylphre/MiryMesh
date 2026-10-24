@@ -6,6 +6,7 @@ package s3api
 import (
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/sylphre/MiryMesh/internal/datanode"
 	"github.com/sylphre/MiryMesh/internal/placement"
@@ -20,9 +21,10 @@ func SetMetricsRecorder(fn func(bool, int64)) { mRecorder = fn }
 // Router routes S3-compatible requests. In M1 it handles path-style only
 // (virtual-hosted style is shimmable but not required for Nextcloud/Misskey).
 type Router struct {
-	store   ObjectStore
-	region  string
-	placing PlacementResolver
+	store    ObjectStore
+	region   string
+	regionMu sync.RWMutex
+	placing  PlacementResolver
 }
 
 // PlacementResolver is the placement decision hook used by S3 handlers.
