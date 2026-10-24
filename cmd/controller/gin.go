@@ -202,9 +202,10 @@ func newS3Engine(router *s3api.Router, authStore *auth.Store, userMgr *users.Man
 	r.POST("/internal/evacuate", ginWrap(dnHandler.HandleEvacuate))
 	r.POST("/internal/restore", ginWrap(dnHandler.HandleRestore))
 	r.Any("/internal/objects/*path", ginWrap(dnHandler.HandleObjects))
-	// Admin hint on S3 port
+	// The admin API is not served on the S3 port. Answer with a bare 404 so a
+	// scanner cannot tell that an admin API exists on another port.
 	r.Any("/api/admin/*path", func(c *gin.Context) {
-		c.String(404, "admin API lives on admin port — use that port with X-Admin-Token")
+		c.String(http.StatusNotFound, "Not Found")
 	})
 	// S3 catch-all with SigV4 middleware — must not conflict with /internal/* static routes
 	r.Use(s3HostGuard(router.BackingStore()))

@@ -20,4 +20,4 @@ We aim to acknowledge within 3 days and to ship a fix within 14 days for validat
 - Admin GUI/API lives on `0.0.0.0:9001` (default `admin_listen`) and S3 on `0.0.0.0:9000`, DataNode on `0.0.0.0:9002` — all reachable via Tailscale `<tailscale-ip>:900x` and `127.0.0.1:900x`. Token is `X-Admin-Token` (from setup wizard → `localStorage`) but it alone is insufficient.
 - Always keep `:9001` (and `:9002`) behind `127.0.0.1` or Tailscale ACL / firewall / mTLS. `0.0.0.0:900x` must not be exposed to the public Internet.
 - If you bind `admin_listen: 127.0.0.1:9001` you restrict admin to localhost only; `0.0.0.0:9001` is the default to allow `<tailscale-ip>:9001` via Tailscale — firewall it.
-- S3 port `0.0.0.0:9000` returns `404 Admin API lives on admin port (0.0.0.0:9001)` for `/api/admin/*` — use the admin port with `X-Admin-Token` and close it via Tailscale ACL / firewall.
+- S3 port `0.0.0.0:9000` returns a bare `404 Not Found` for `/api/admin/*` and does not reveal that the admin API exists on another port. Use the admin port with `X-Admin-Token` and close it via Tailscale ACL / firewall.
