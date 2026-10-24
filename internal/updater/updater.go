@@ -62,7 +62,7 @@ type Checker struct {
 	interval   time.Duration
 	client     *http.Client
 
-	fetchMu sync.Mutex // serialises lookups
+	fetchMu sync.Mutex // serializes lookups
 	mu      sync.RWMutex
 	status  Status
 	last    time.Time // last attempt, successful or not
@@ -161,7 +161,7 @@ func (c *Checker) latest(ctx context.Context) (*release, error) {
 	if err != nil {
 		return nil, fmt.Errorf("release lookup failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("release lookup failed: %s", resp.Status)
 	}

@@ -141,18 +141,18 @@ func (h *Handler) HandleNodeUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ノードに接続できません: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	text := strings.TrimSpace(string(msg))
 
-	switch {
-	case resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusAccepted, http.StatusOK:
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "updating", "node_id": req.NodeID, "version": target})
-	case resp.StatusCode == http.StatusNotFound:
+	case http.StatusNotFound:
 		http.Error(w, "このノードは Master からの更新に未対応です。ノード側で install.sh --update を一度実行してください", http.StatusConflict)
-	case resp.StatusCode == http.StatusConflict:
+	case http.StatusConflict:
 		http.Error(w, text, http.StatusConflict)
 	default:
 		http.Error(w, fmt.Sprintf("ノードが更新を受け付けませんでした (HTTP %d): %s", resp.StatusCode, text), http.StatusBadGateway)

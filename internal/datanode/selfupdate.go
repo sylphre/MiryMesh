@@ -187,8 +187,8 @@ func (u *Updater) Apply(tag string) error {
 	if want == "" {
 		return fmt.Errorf("SHA256SUMS has no entry for %s", name)
 	}
-	if err := os.MkdirAll(u.StageDir, 0o750); err != nil {
-		return fmt.Errorf("create %s: %w", u.StageDir, err)
+	if mkErr := os.MkdirAll(u.StageDir, 0o750); mkErr != nil {
+		return fmt.Errorf("create %s: %w", u.StageDir, mkErr)
 	}
 	part := filepath.Join(u.StageDir, stagedBinary+".part")
 	got, err := u.download(base+"/"+name, part)
