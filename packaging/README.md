@@ -2,7 +2,7 @@
 <!-- Copyright (C) 2014-2026 Laurier Sylph. All rights reserved. -->
 # Packaging — Phase 9 (nfpm + goreleaser)
 
-Supported distros (docs/01): Debian 12/13, Ubuntu 24.04/26.04 LTS, AlmaLinux 9/10, Rocky Linux 9/10.
+Supported distros: Debian 12/13, Ubuntu 24.04/26.04 LTS, AlmaLinux 9/10, Rocky Linux 9/10.
 
 - `systemd/` — unit files (`mirymesh-controller.service`, `mirymesh-datanode.service`) + `/etc/mirymesh/config.yaml` + `/var/lib/mirymesh`, `/var/log` layout.
 - `nfpm.yaml` — unified `nfpm` config for DEB+RPM (single file, `--packager deb/rpm`). `packaging/scripts/{pre,post}{install,remove}.sh` create `mirymesh:mirymesh` idempotently; see `User=mirymesh` in systemd units.

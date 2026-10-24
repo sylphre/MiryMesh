@@ -23,10 +23,16 @@ import (
 	"github.com/sylphre/MiryMesh/internal/datanode"
 	"github.com/sylphre/MiryMesh/internal/placement"
 	"github.com/sylphre/MiryMesh/internal/s3api"
+	"github.com/sylphre/MiryMesh/internal/updater"
 	"github.com/sylphre/MiryMesh/internal/users"
+	"github.com/sylphre/MiryMesh/internal/version"
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-version" || os.Args[1] == "version") {
+		fmt.Println(version.Version)
+		return
+	}
 	cfgPath := "/etc/mirymesh/config.yaml"
 	if len(os.Args) > 1 {
 		cfgPath = os.Args[1]
@@ -241,6 +247,19 @@ func main() {
 	adminHandler := admin.NewWithSetup(reg, store, resolver, jobsStore, internalToken, setupStore, authStore)
 	adminHandler.SetDBConfig(cfg.DB.Driver, cfg.DB.DSN)
 	adminHandler.SetUserManager(userMgr)
+	// Release notice: polls GitHub Releases and shows a banner in the console.
+	// MIRYMESH_UPDATE_CHECK=off disables it; MIRYMESH_UPDATE_PRERELEASE=1 also
+	// follows pre-releases (always on when this build is itself a pre-release).
+	updateOn := true
+	switch strings.ToLower(os.Getenv("MIRYMESH_UPDATE_CHECK")) {
+	case "off", "0", "false", "no":
+		updateOn = false
+	}
+	updatePre := version.IsPrerelease(version.Version) || os.Getenv("MIRYMESH_UPDATE_PRERELEASE") == "1"
+	updateChecker := updater.New(version.Version, updateOn, updatePre)
+	adminHandler.SetUpdateChecker(updateChecker)
+	updateChecker.Start()
+	slog.Info("controller: version", "version", version.Version, "update_check", updateOn, "prerelease", updatePre)
 	s3api.SetMetricsRecorder(func(isGet bool, bytes int64) {
 		if isGet {
 			adminHandler.Metrics().RecordGet(bytes)

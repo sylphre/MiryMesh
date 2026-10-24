@@ -72,6 +72,10 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 	adminG.POST("/generate-credentials", ginWrapAuth(h, h.HandleGenerateCredentials))
 	adminG.POST("/pair-token", ginWrapAuth(h, h.HandlePairToken))
 	adminG.POST("/nodes/adopt", ginWrapAuth(h, h.HandleAdoptNode))
+	// Release notice (Master) and Master-triggered DataNode update
+	adminG.GET("/update", ginWrapAuth(h, h.HandleUpdateInfo))
+	adminG.POST("/update/check", ginWrapAuth(h, h.HandleUpdateCheck))
+	adminG.POST("/nodes/update", ginWrapAuth(h, h.HandleNodeUpdate))
 	adminG.GET("/config", ginWrap(h.HandleConfig))
 	adminG.PUT("/config/policy", ginWrapAuth(h, h.HandleConfigPolicy))
 

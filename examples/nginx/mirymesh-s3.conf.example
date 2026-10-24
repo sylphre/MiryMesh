@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+#
+# MiryMesh S3 エンドポイントを NGINX の TLS 終端の裏に置く例。
+# 配置: /etc/nginx/conf.d/mirymesh-s3.conf  →  nginx -t && systemctl reload nginx
+#
+# 前提
+#   - MiryMesh の S3 は 127.0.0.1:9000 で待ち受ける（server.listen）
+#   - S3 クライアント (Nextcloud / Misskey / rclone / aws-cli) は SigV4 で署名する。
+#     Authorization と Host を変えると署名が合わなくなるので、そのまま渡す。
+#   - Admin (:9001) はここに含めない。packaging/nginx/nginx.conf.example を参照。
+#
+# 書き換える箇所: server_name と証明書のパス
+
+server {
+    listen 80;
+    server_name s3.example.com;
+
+    # ACME http-01 を使う場合は、この redirect の前に challenge 用 location を足す
+    return 301 https://$host$request_uri;
+}
+
+server {
+    # "http2" パラメータは NGINX 1.25.1 以降で deprecated 警告が出るだけで動く。
+    # 1.25.1 未満 (Debian 12 / Ubuntu 24.04 など) でも使えるのでこの書き方にしている。
+    listen 443 ssl http2;
+    server_name s3.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/s3.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/s3.example.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    # マルチパートの 1 パートは最大 5 GiB
+    client_max_body_size 5g;
+
+    # アップロード / ダウンロードをディスクに溜めずに流す
+    proxy_request_buffering off;
+    proxy_buffering         off;
+    proxy_http_version      1.1;
+
+    # バケットの「許可するドメイン」判定と SigV4 の署名検証は Host を使う。必ず元の Host を渡す
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    location / {
+        proxy_pass http://127.0.0.1:9000;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    location = /healthz {
+        proxy_pass http://127.0.0.1:9000;
+        access_log off;
+    }
+}

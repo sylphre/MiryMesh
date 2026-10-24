@@ -16,6 +16,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - CI: `ci.yml` (lint-test, e2e, packaging, linux-matrix, e2e-external).
 - S3 SSE-C (AES-256-CTR, copy-source keys, multipart) and checksum validation (`Content-MD5`, CRC32/CRC32C/CRC64NVME/SHA1/SHA256, COMPOSITE / FULL_OBJECT multipart checksums, `x-amz-checksum-mode`).
 - S3 `aws-chunked` request bodies: `STREAMING-AWS4-HMAC-SHA256-PAYLOAD[-TRAILER]` and `STREAMING-UNSIGNED-PAYLOAD-TRAILER` with chunk/trailer signature verification and trailing `x-amz-checksum-*` validation.
+- `examples/`: NGINX (S3 / public read) and systemd drop-in samples.
+- `install.sh --client` installs the prebuilt, sha256-verified static DataNode from GitHub Releases (falls back to a source build); the release workflow now publishes `mirymesh-datanode-linux-{amd64,arm64}` and `SHA256SUMS`.
+- `install.sh`: accepts `--opt VALUE` as well as `--opt=VALUE`, accepts `--skip-db-check`, makes the DataNode data paths writable under `ProtectSystem=strict`, and passes the one-time pair token through a drop-in that is removed after pairing.
+- Nodes page: the "Node を追加" command is now a `curl | sudo bash` one-liner that works on a host without a repository checkout.
+- `install.sh`: interactive prompts (role, Master URL, pair token, data paths, confirmation) that also work under `curl | sudo bash`; `--yes` disables them. New `--update` flag updates an existing install in place (role auto-detected, config and data kept). Without a stable release it falls back to the newest pre-release such as `v1.0.0-rc.1`.
+- Update notice: the Master checks GitHub Releases (`GET /api/admin/update`, `POST /api/admin/update/check`) and the console shows a dismissible banner when a newer version exists.
+- One-click DataNode update: the Nodes page shows each node's version and an "更新" button (`POST /api/admin/nodes/update`). The DataNode downloads the release binary, verifies it against `SHA256SUMS`, stages it and exits with code 75. A root-owned `ExecStartPre` helper installed by `install.sh` replaces the binary (previous one kept as `.prev`) before systemd restarts the service. Run `install.sh --update` once on each existing node to enable it, or pass `--no-self-update` to opt out.
+- DataNodes report their version when registering.
 
 ## [0.0.0-dev] - Initial
 - Repository scaffolding and Phase 0 baseline.

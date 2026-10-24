@@ -42,6 +42,8 @@ type Handler struct {
 	adopter func(controllerURL, pairToken string) error
 	// nodeTok is the per-node token learned after registration (DataNode side).
 	nodeTok tokenBox
+	// updater serves /internal/update (DataNode side, optional).
+	updater *Updater
 }
 
 // NewHandler creates a Handler.
@@ -71,12 +73,15 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/internal/objects/", h.handleObjects)
 	// Controller-initiated pairing (404 unless an adopter is installed)
 	mux.HandleFunc("/internal/adopt", h.handleAdopt)
+	// Master-triggered self-update (needs the node token; 404 unless an updater is installed)
+	mux.HandleFunc("/internal/update", h.handleUpdate)
 }
 
 type registerReq struct {
-	NodeID string `json:"node_id"`
-	Addr   string `json:"addr"`
-	Token  string `json:"token"`
+	NodeID  string `json:"node_id"`
+	Addr    string `json:"addr"`
+	Token   string `json:"token"`
+	Version string `json:"version"` // optional: release version of the DataNode binary
 }
 
 func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +115,7 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	h.registry.SetNodeVersion(req.NodeID, req.Version)
 	resp := map[string]string{"status": "ok"}
 	if h.token != "" {
 		// Per-node credential for later heartbeat/disk calls and re-registration.

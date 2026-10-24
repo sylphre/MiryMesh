@@ -6,9 +6,10 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/mirymesh-controller ./cmd/controller
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/mirymesh-datanode ./cmd/datanode
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/mirymesh ./cmd/mirymesh
+ARG VERSION=dev
+RUN CGO_ENABLED=1 go build -ldflags="-s -w -X github.com/sylphre/MiryMesh/internal/version.Version=${VERSION}" -o /out/mirymesh-controller ./cmd/controller
+RUN CGO_ENABLED=1 go build -ldflags="-s -w -X github.com/sylphre/MiryMesh/internal/version.Version=${VERSION}" -o /out/mirymesh-datanode ./cmd/datanode
+RUN CGO_ENABLED=1 go build -ldflags="-s -w -X github.com/sylphre/MiryMesh/internal/version.Version=${VERSION}" -o /out/mirymesh ./cmd/mirymesh
 
 FROM debian:12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*

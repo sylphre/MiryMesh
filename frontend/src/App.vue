@@ -8,7 +8,7 @@ import BrandMark from './components/BrandMark.vue'
 import ToastHost from './components/ToastHost.vue'
 import ConfirmHost from './components/ConfirmHost.vue'
 import { theme, toggleTheme } from './lib/theme.js'
-import { clearToken } from './lib/api.js'
+import { api, clearToken, getToken } from './lib/api.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -56,6 +56,40 @@ function logout() {
   clearToken()
   router.push('/login')
 }
+
+// Release notice: the Master polls GitHub Releases; the console only shows the cached result.
+const DISMISS_KEY = 'mirymesh_update_dismissed'
+const update = ref(null)
+const dismissed = ref('')
+try { dismissed.value = localStorage.getItem(DISMISS_KEY) || '' } catch { /* storage unavailable */ }
+
+const showUpdate = computed(
+  () => !!update.value && !!update.value.update_available && update.value.latest !== dismissed.value,
+)
+const releaseUrl = computed(() => {
+  const u = update.value && update.value.release_url
+  return typeof u === 'string' && u.startsWith('https://') ? u : ''
+})
+
+async function loadUpdate() {
+  if (bare.value || !getToken()) return
+  try {
+    update.value = await api('/api/admin/update', { redirectOn401: false })
+  } catch {
+    /* the notice is optional, so errors stay silent */
+  }
+}
+
+function dismissUpdate() {
+  if (!update.value) return
+  dismissed.value = update.value.latest || ''
+  try { localStorage.setItem(DISMISS_KEY, dismissed.value) } catch { /* storage unavailable */ }
+}
+
+let updateTimer = null
+watch(bare, (isBare) => { if (!isBare) loadUpdate() }, { immediate: true })
+onMounted(() => { updateTimer = setInterval(loadUpdate, 30 * 60 * 1000) })
+onBeforeUnmount(() => { if (updateTimer) clearInterval(updateTimer) })
 </script>
 
 <template>
@@ -121,6 +155,15 @@ function logout() {
         </header>
 
         <main id="main" class="content" tabindex="-1">
+          <div v-if="showUpdate" class="alert alert--info" role="status" style="margin-bottom: 16px">
+            <Icon name="refresh" />
+            <div class="alert__body">
+              新しいバージョン <strong>{{ update.latest }}</strong> が公開されています（現在 {{ update.current }}）。
+              Master は <code>install.sh --update</code> で更新できます。DataNode は Nodes 画面からワンクリックで更新できます。
+              <a v-if="releaseUrl" :href="releaseUrl" target="_blank" rel="noopener noreferrer">リリースノート</a>
+            </div>
+            <button type="button" class="btn btn--sm btn--ghost" @click="dismissUpdate">閉じる</button>
+          </div>
           <router-view :key="route.path" />
         </main>
       </div>

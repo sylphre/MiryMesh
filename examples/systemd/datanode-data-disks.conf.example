@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+#
+# DataNode のデータ置き場 (--path / datanode.paths) をサービスから書き込めるようにする drop-in。
+# packaging/systemd/mirymesh-datanode.service は ProtectSystem=strict なので、
+# ReadWritePaths に書かれていないディレクトリは読み取り専用になり、/mnt/disk1 などに保存できない。
+# install.sh --client --path ... を使うと、同じ内容を自動で作る。
+#
+# 配置: /etc/systemd/system/mirymesh-datanode.service.d/20-data-paths.conf
+#   sudo mkdir -p /etc/systemd/system/mirymesh-datanode.service.d
+#   sudo cp datanode-data-disks.conf.example /etc/systemd/system/mirymesh-datanode.service.d/20-data-paths.conf
+#   sudo chown mirymesh:mirymesh /mnt/disk1 /mnt/disk2
+#   sudo systemctl daemon-reload && sudo systemctl restart mirymesh-datanode
+#
+# /mnt/disk1 /mnt/disk2 は自分のマウント先に書き換える。
+
+[Service]
+ReadWritePaths=/mnt/disk1 /mnt/disk2
+
+# /etc/fstab にあるマウントが済むまで起動を待つ。
+# ディスクが外れたまま起動して、ルートファイルシステムに書き込む事故を防ぐ。
+RequiresMountsFor=/mnt/disk1 /mnt/disk2

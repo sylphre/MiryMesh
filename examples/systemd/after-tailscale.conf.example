@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+#
+# Tailscale の IP (100.x.y.z) で待ち受けるとき、tailscaled が上がってから起動させる drop-in。
+# Tailscale は MiryMesh の必須依存ではないので、使う場合だけ入れる。
+# 起動が早すぎると、その IP がまだ無くて bind に失敗する。
+#
+# 配置 (Master なら mirymesh-controller、DataNode なら mirymesh-datanode):
+#   sudo mkdir -p /etc/systemd/system/mirymesh-datanode.service.d
+#   sudo cp after-tailscale.conf.example /etc/systemd/system/mirymesh-datanode.service.d/05-after-tailscale.conf
+#   sudo systemctl daemon-reload && sudo systemctl restart mirymesh-datanode
+
+[Unit]
+After=network-online.target tailscaled.service
+Wants=network-online.target

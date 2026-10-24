@@ -8,6 +8,7 @@ import { api } from '../lib/api.js'
 import { formatBytes, timeAgo, formatDate, percent } from '../lib/format.js'
 import { copyText } from '../lib/clipboard.js'
 import { toastErr, toastOk } from '../lib/toast.js'
+import { confirmDialog } from '../lib/dialog.js'
 
 const nodes = ref([])
 const disks = ref([])
@@ -24,6 +25,9 @@ const showAdopt = ref(false)
 const adopting = ref(false)
 const adopt = reactive({ addr: '', controllerUrl: origin })
 
+const masterVersion = ref('')
+const updating = ref('')
+
 async function load() {
   try {
     const [n, d] = await Promise.all([api('/api/admin/nodes'), api('/api/admin/disks')])
@@ -39,6 +43,7 @@ async function load() {
 
 onMounted(() => {
   load()
+  loadMasterVersion()
   timer = setInterval(load, 10000)
 })
 onUnmounted(() => { if (timer) clearInterval(timer) })
@@ -84,8 +89,41 @@ async function adoptNode() {
   }
 }
 
+async function loadMasterVersion() {
+  try {
+    const j = await api('/api/admin/update', { redirectOn401: false })
+    masterVersion.value = (j && j.current) || ''
+  } catch {
+    /* the version column still works without it */
+  }
+}
+
+// Only online nodes that reported a version different from the Master's can be updated.
+function canUpdate(n) {
+  return n.Status === 'online' && !!n.Version && !!masterVersion.value && n.Version !== masterVersion.value
+}
+
+async function updateNode(n) {
+  const ok = await confirmDialog({
+    title: 'DataNode を更新',
+    message: `${n.ID} を Master と同じ ${masterVersion.value} に更新します。サービスが数秒間再起動します。`,
+    confirmLabel: '更新する',
+  })
+  if (!ok) return
+  updating.value = n.ID
+  try {
+    await api('/api/admin/nodes/update', { method: 'POST', body: { node_id: n.ID } })
+    toastOk(`${n.ID} に更新を依頼しました。再起動後に Version が切り替わります`)
+    setTimeout(load, 8000)
+  } catch (e) {
+    toastErr(e)
+  } finally {
+    updating.value = ''
+  }
+}
+
 const installCmd = computed(
-  () => `sudo bash packaging/scripts/install.sh --client --master-url ${origin} --pair-token ${pairToken.value} --path /mnt/disk1`,
+  () => `curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash -s -- --client --master-url ${origin} --pair-token ${pairToken.value} --path /mnt/disk1`,
 )
 const daemonCmd = computed(
   () => `mirymesh-datanode --controller-url ${origin} --pair-token ${pairToken.value} --path /mnt/disk1`,
@@ -134,6 +172,8 @@ const daemonCmd = computed(
               <th class="num">Disks</th>
               <th>Usage</th>
               <th>Last seen</th>
+              <th>Version</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -154,6 +194,13 @@ const daemonCmd = computed(
                 <span v-else class="muted">—</span>
               </td>
               <td :title="formatDate(n.LastSeen)">{{ timeAgo(n.LastSeen) }}</td>
+              <td class="mono">{{ n.Version || '—' }}</td>
+              <td class="num">
+                <button v-if="canUpdate(n)" type="button" class="btn btn--sm" :disabled="updating === n.ID" @click="updateNode(n)">
+                  <span v-if="updating === n.ID" class="spinner" aria-hidden="true"></span>
+                  <Icon v-else name="refresh" :size="14" />更新
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>

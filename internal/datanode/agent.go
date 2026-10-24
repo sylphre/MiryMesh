@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/sylphre/MiryMesh/internal/config"
+	"github.com/sylphre/MiryMesh/internal/version"
 )
 
 // errUnknownNode is returned by Heartbeat when the controller does not know this node
@@ -176,6 +177,7 @@ func (a *Agent) Register() error {
 		"node_id": a.nodeID,
 		"addr":    addr,
 		"token":   a.currentToken(),
+		"version": version.Version,
 	})
 	resp, err := a.client.Post(base+"/internal/register", "application/json", bytes.NewReader(body))
 	if err != nil {

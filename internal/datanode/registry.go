@@ -25,6 +25,7 @@ type Node struct {
 	Addr     string
 	Status   NodeStatus
 	LastSeen time.Time
+	Version  string // release version the node reported when it registered ("" = unknown)
 }
 
 // DiskPath represents a storage path on a data node.
@@ -117,6 +118,23 @@ func (r *Registry) Heartbeat(id string) error {
 	n.LastSeen = time.Now()
 	n.Status = StatusOnline
 	return nil
+}
+
+// SetNodeVersion records the release version a node reported. Empty values are ignored,
+// so older DataNodes that do not send a version keep showing as unknown.
+func (r *Registry) SetNodeVersion(id, ver string) {
+	ver = strings.TrimSpace(ver)
+	if ver == "" {
+		return
+	}
+	if len(ver) > 64 {
+		ver = ver[:64]
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if n, ok := r.nodes[id]; ok {
+		n.Version = ver
+	}
 }
 
 // MarkOfflineIfStale marks nodes offline whose LastSeen exceeds timeout.

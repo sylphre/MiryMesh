@@ -17,17 +17,23 @@ import (
 	"github.com/sylphre/MiryMesh/internal/config"
 	"github.com/sylphre/MiryMesh/internal/datanode"
 	"github.com/sylphre/MiryMesh/internal/s3api"
+	"github.com/sylphre/MiryMesh/internal/version"
 )
 
 func main() {
 	var controllerURL, pairToken string
 	var paths multiFlag
-	var allowAdopt bool
+	var allowAdopt, showVersion bool
 	flag.StringVar(&controllerURL, "controller-url", "", "controller URL (e.g. http://master:9001)")
 	flag.StringVar(&pairToken, "pair-token", "", "one-time pairing token from POST /api/admin/pair-token")
 	flag.Var(&paths, "path", "datanode path (repeatable, e.g. --path /mnt/disk1)")
 	flag.BoolVar(&allowAdopt, "allow-adopt", false, "accept controller-initiated pairing via POST /internal/adopt (only while unpaired; enable on trusted networks only)")
+	flag.BoolVar(&showVersion, "version", false, "print the version and exit")
 	flag.Parse()
+	if showVersion {
+		fmt.Println(version.Version)
+		return
+	}
 	cfgPath := "/etc/mirymesh/config.yaml"
 	if flag.NArg() > 0 {
 		cfgPath = flag.Arg(0)
@@ -94,6 +100,11 @@ func main() {
 		tokenDir = "/var/lib/mirymesh"
 	}
 	agent.Bind(filepath.Join(tokenDir, "datanode.token"), dnHandler.SetNodeToken)
+	// Master-triggered self-update: stages a verified release binary under <data dir>/update.
+	selfUpdater := datanode.NewUpdater(filepath.Join(tokenDir, "update"))
+	selfUpdater.CheckStaged()
+	dnHandler.SetUpdater(selfUpdater)
+	slog.Info("datanode: version", "version", version.Version, "self_update", selfUpdater.Enabled)
 	if allowAdopt {
 		dnHandler.SetAdopter(agent.Adopt)
 		slog.Warn("datanode: controller-initiated pairing enabled (/internal/adopt); keep the DataNode port on a trusted network")

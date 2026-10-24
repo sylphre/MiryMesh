@@ -24,8 +24,27 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
+      - name: release version
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          v="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          case "$v" in v[0-9]*.[0-9]*.[0-9]*) ;; *) v="dev" ;; esac
+          echo "RELEASE_VERSION=$v" >> "$GITHUB_ENV"
+          echo "version: $v"
       - name: build binaries
-        run: go build -trimpath -o /tmp/mirymesh-controller ./cmd/controller && go build -trimpath -o /tmp/mirymesh-datanode ./cmd/datanode && go build -trimpath -o /tmp/mirymesh ./cmd/mirymesh
+        run: |
+          LDF="-X github.com/sylphre/MiryMesh/internal/version.Version=$RELEASE_VERSION"
+          go build -trimpath -ldflags="$LDF" -o /tmp/mirymesh-controller ./cmd/controller
+          go build -trimpath -ldflags="$LDF" -o /tmp/mirymesh-datanode ./cmd/datanode
+          go build -trimpath -ldflags="$LDF" -o /tmp/mirymesh ./cmd/mirymesh
+      - name: static datanode binaries
+        run: |
+          mkdir -p dist-bin
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w -X github.com/sylphre/MiryMesh/internal/version.Version=$RELEASE_VERSION" -o dist-bin/mirymesh-datanode-linux-$arch ./cmd/datanode
+          done
+          (cd dist-bin && sha256sum mirymesh-datanode-linux-* > SHA256SUMS && cat SHA256SUMS)
       - name: nfpm deb/rpm
         run: |
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
@@ -40,12 +59,13 @@ jobs:
           push: false
           load: true
           tags: mirymesh:${{ github.ref_name }}
+          build-args: VERSION=${{ env.RELEASE_VERSION }}
       - name: gh release create (dry-run if manual dispatch without tag)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            gh release create "${{ github.ref_name }}" mirymesh.deb mirymesh.rpm --title "${{ github.ref_name }}" --notes "See CHANGELOG.md — LICENSE AGPL-3.0-only bundled" || true
+            gh release create "${{ github.ref_name }}" mirymesh.deb mirymesh.rpm dist-bin/mirymesh-datanode-linux-amd64 dist-bin/mirymesh-datanode-linux-arm64 dist-bin/SHA256SUMS --title "${{ github.ref_name }}" --notes "See CHANGELOG.md — LICENSE AGPL-3.0-only bundled" || true
           else
             echo "manual dispatch: skipping gh release create (no tag)"
             ls -lh mirymesh.deb mirymesh.rpm
