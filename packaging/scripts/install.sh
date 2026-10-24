@@ -67,7 +67,7 @@ _left=$#
 while [ "$_left" -gt 0 ]; do
   _opt="$1"; shift; _left=$((_left - 1))
   case "$_opt" in
-    --master-url|--pair-token|--path|--repo|--version|--branch|--channel)
+    --master-url|--pair-token|--path|--repo|--version|--branch|--channel|--db-driver|--db-user|--db-name|--db-password)
       if [ "$_left" -eq 0 ]; then echo "usage: $_opt VALUE" >&2; exit 1; fi
       set -- "$@" "$_opt=$1"; shift; _left=$((_left - 1)) ;;
     *) set -- "$@" "$_opt" ;;
@@ -95,6 +95,7 @@ for arg in "$@"; do
     --dev) MODE="from-source" ;;
     --no-enable) NO_ENABLE=1 ;;
     --skip-db-check) SKIP_DB_CHECK=1 ;;
+    --db-driver=*|--db-user=*|--db-name=*|--db-password=*) ;; # read again in the Master DB step
     --release) MODE="release" ;;
     --version=*) VERSION="${arg#--version=}" ;;
     --update|--upgrade) UPDATE=1 ;;
@@ -114,6 +115,8 @@ for arg in "$@"; do
       echo "  --prerelease  Follow the prerelease channel: newest release including pre-releases, and the prerelease branch for source builds"
       echo "  --channel  release|prerelease. --update keeps the channel the host is on unless this is given"
       echo "  --skip-db-check  Master: skip the PostgreSQL/MySQL presence check"
+      echo "  --db-driver postgres|mysql  Master: database to set up when both are installed (default: ask, or postgres with --yes)"
+      echo "  --db-user NAME / --db-name NAME / --db-password PASS  Master: role/user, database and password to create (default: mirymesh, mirymesh, random)"
       echo "  --update   Update an existing install in place (role and config are kept; --version TAG pins the release)"
       echo "  --yes, -y  Never prompt, use defaults (for scripts)"
       echo "  --no-self-update  DataNode: do not enable one-click update from the Master"
@@ -427,6 +430,10 @@ install_from_source() {
   # go:embed reads frontend/dist at compile time, so the console is built before `go build`.
   if [ "$ROLE" != "client" ]; then build_frontend; fi
   log "Building from source (go 1.22, trimpath, no Docker)"
+  # The bundled go-sqlite3 C source triggers a harmless -Wdiscarded-qualifiers warning on newer gcc.
+  # Silence only that warning; everything else still shows.
+  CGO_CFLAGS="${CGO_CFLAGS:-} -Wno-discarded-qualifiers"
+  export CGO_CFLAGS
   _ldf=""
   [ -z "$VERSION" ] || _ldf="-X github.com/sylphre/MiryMesh/internal/version.Version=$VERSION"
   (cd "$SRC" && go build -trimpath -ldflags="$_ldf" -o /tmp/mirymesh-controller ./cmd/controller)
@@ -561,56 +568,196 @@ case "$MODE" in
   rpm)         install_rpm ;;
 esac
 
-# DB check (Master only) — PostgreSQL or MySQL/MariaDB required
+# DB (Master only): PostgreSQL or MySQL/MariaDB is required.
+# Pick one, create the role/user and the database, and hand the DSN to the controller through
+# /etc/mirymesh/controller.env (see write_controller_env). The Setup page then has no DSN to ask for.
+DB_DRIVER_FINAL=""
+DB_DSN=""
+
+# db_rand BYTES — random hex string (2*BYTES characters).
+db_rand() {
+  openssl rand -hex "$1" 2>/dev/null || head -c "$1" /dev/urandom | od -An -tx1 | tr -d ' \n'
+}
+
+# Names go into SQL, so allow only [A-Za-z_][A-Za-z0-9_]* (max 32). Passwords also end up in a URL/DSN.
+db_ident_ok() {
+  case "$1" in ''|[0-9]*|*[!A-Za-z0-9_]*) return 1 ;; esac
+  [ "${#1}" -le 32 ]
+}
+db_pass_ok() {
+  case "$1" in ''|*[!A-Za-z0-9._~-]*) return 1 ;; esac
+}
+
+# Run psql as the postgres OS user; SQL comes from stdin, stdout is the bare result.
+pg_admin() {
+  if command -v runuser >/dev/null 2>&1; then
+    (cd / && runuser -u postgres -- psql -X -q -A -t -v ON_ERROR_STOP=1 "$@")
+  elif command -v sudo >/dev/null 2>&1; then
+    (cd / && sudo -u postgres psql -X -q -A -t -v ON_ERROR_STOP=1 "$@")
+  else
+    echo "neither runuser nor sudo found" >&2
+    return 127
+  fi
+}
+
+# Create (or reset the password of) the role and create the database, one statement per call:
+# CREATE DATABASE cannot run inside the implicit transaction of a multi-statement -c.
+provision_pg() {
+  _pg_out="$(printf "SELECT 1 FROM pg_roles WHERE rolname='%s';\n" "$db_user" | pg_admin 2>&1)" \
+    || { log "PostgreSQL: cannot run psql as the postgres user: $_pg_out"; return 1; }
+  if [ "$_pg_out" = "1" ]; then
+    _pg_sql="ALTER ROLE \"$db_user\" WITH LOGIN PASSWORD '$db_pass';"
+  else
+    _pg_sql="CREATE ROLE \"$db_user\" WITH LOGIN PASSWORD '$db_pass';"
+  fi
+  _pg_out="$(printf '%s\n' "$_pg_sql" | pg_admin 2>&1)" \
+    || { log "PostgreSQL: role setup failed: $_pg_out"; return 1; }
+
+  _pg_out="$(printf "SELECT 1 FROM pg_database WHERE datname='%s';\n" "$db_name" | pg_admin 2>&1)" \
+    || { log "PostgreSQL: database lookup failed: $_pg_out"; return 1; }
+  if [ "$_pg_out" = "1" ]; then
+    _pg_sql="ALTER DATABASE \"$db_name\" OWNER TO \"$db_user\";"
+  else
+    _pg_sql="CREATE DATABASE \"$db_name\" OWNER \"$db_user\";"
+  fi
+  _pg_out="$(printf '%s\n' "$_pg_sql" | pg_admin 2>&1)" \
+    || { log "PostgreSQL: database setup failed: $_pg_out"; return 1; }
+
+  # The controller connects over TCP with a password, so check exactly that.
+  _pg_out="$(PGPASSWORD="$db_pass" psql -X -q -A -t -h 127.0.0.1 -p 5432 -U "$db_user" -d "$db_name" -c 'SELECT 1' </dev/null 2>&1)" \
+    || { log "PostgreSQL: login as $db_user over 127.0.0.1:5432 failed: $_pg_out"; return 1; }
+  log "PostgreSQL: role '$db_user' and database '$db_name' are ready"
+}
+
+# MySQL/MariaDB: connect as root through the local socket (what a fresh apt/dnf install allows).
+provision_mysql() {
+  _my_out="$(
+    {
+      printf "CREATE DATABASE IF NOT EXISTS \`%s\` CHARACTER SET utf8mb4;\n" "$db_name"
+      for _h in localhost 127.0.0.1; do
+        printf "CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';\n" "$db_user" "$_h" "$db_pass"
+        printf "ALTER USER '%s'@'%s' IDENTIFIED BY '%s';\n" "$db_user" "$_h" "$db_pass"
+        printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'%s';\n" "$db_name" "$db_user" "$_h"
+      done
+    } | "$MYSQL_CLI" -u root 2>&1
+  )" || { log "MySQL/MariaDB: could not run SQL as root (needs socket auth for root): $_my_out"; return 1; }
+
+  _my_out="$(MYSQL_PWD="$db_pass" "$MYSQL_CLI" --protocol=TCP -h 127.0.0.1 -P 3306 -u "$db_user" -D "$db_name" -e 'SELECT 1' </dev/null 2>&1)" \
+    || { log "MySQL/MariaDB: login as $db_user over 127.0.0.1:3306 failed: $_my_out"; return 1; }
+  log "MySQL/MariaDB: user '$db_user' and database '$db_name' are ready"
+}
+
+# Hand the DSN (and the master key it needs) to the controller. Written root:root 0600 and read by
+# systemd through a drop-in, so the secrets are not in config.yaml. An existing master key is never replaced.
+write_controller_env() {
+  [ -n "$DB_DSN" ] || return 0
+  _ce=/etc/mirymesh/controller.env
+  if [ ! -f "$_ce" ]; then ( umask 077; : > "$_ce" ); fi
+  chmod 0600 "$_ce" 2>/dev/null || true
+  chown root:root "$_ce" 2>/dev/null || true
+  if ! grep -q '^MIRYMESH_MASTER_KEY=.' "$_ce" 2>/dev/null; then
+    _mk="${MIRYMESH_MASTER_KEY:-$(db_rand 32)}"
+    printf 'MIRYMESH_MASTER_KEY=%s\n' "$_mk" >> "$_ce"
+    log "Generated a master key in $_ce — back this file up; stored secrets cannot be decrypted without the key"
+  fi
+  # Replace (not append) the DB lines so a rerun never leaves two copies.
+  _ce_tmp="$_ce.tmp"
+  ( umask 077; grep -v -e '^MIRYMESH_DB_DRIVER=' -e '^MIRYMESH_DB_DSN=' "$_ce" > "$_ce_tmp" || true )
+  printf 'MIRYMESH_DB_DRIVER=%s\nMIRYMESH_DB_DSN=%s\n' "$DB_DRIVER_FINAL" "$DB_DSN" >> "$_ce_tmp"
+  mv "$_ce_tmp" "$_ce"
+  chmod 0600 "$_ce" 2>/dev/null || true
+  chown root:root "$_ce" 2>/dev/null || true
+  _dd=/etc/systemd/system/mirymesh-controller.service.d
+  mkdir -p "$_dd"
+  cat > "$_dd/10-secrets.conf" <<'EOF'
+[Unit]
+After=postgresql.service mariadb.service mysql.service
+
+[Service]
+EnvironmentFile=/etc/mirymesh/controller.env
+EOF
+  log "Database ($DB_DRIVER_FINAL) passed to the controller via $_ce — the Setup page will not ask for a DSN"
+}
+
 if [ "$ROLE" = "master" ] && [ "${SKIP_DB_CHECK:-}" != "1" ]; then
   _skip=false
   for a in "$@"; do [ "$a" = "--skip-db-check" ] && _skip=true; done
   if [ "$_skip" = "true" ] || [ "${MIRYMESH_SKIP_DB_CHECK:-}" = "1" ]; then
     log "DB check skipped (--skip-db-check)"
   else
-    has_pg=false; has_mysql=false
+    has_pg=false; has_mysql=false; MYSQL_CLI=""
     command -v psql >/dev/null 2>&1 && has_pg=true
-    command -v mysql >/dev/null 2>&1 && has_mysql=true
-    command -v mariadb >/dev/null 2>&1 && has_mysql=true
+    if command -v mariadb >/dev/null 2>&1; then MYSQL_CLI=mariadb; has_mysql=true
+    elif command -v mysql >/dev/null 2>&1; then MYSQL_CLI=mysql; has_mysql=true
+    fi
     if [ "$has_pg" = "false" ] && [ "$has_mysql" = "false" ]; then
       echo "[install] PostgreSQL or MySQL/MariaDB is required — install one then rerun (apt: postgresql, dnf: postgresql-server / mariadb-server)" >&2
       echo "       or: $0 --skip-db-check  to skip this check" >&2
       exit 1
     fi
-    # Auto-create DB if possible (interactive or env)
+
     db_user="${MIRYMESH_DB_USER:-}"; db_pass="${MIRYMESH_DB_PASSWORD:-}"; db_name="${MIRYMESH_DB_NAME:-}"; db_driver="${MIRYMESH_DB_DRIVER:-}"
     for a in "$@"; do case "$a" in --db-user=*) db_user="${a#--db-user=}";; --db-password=*) db_pass="${a#--db-password=}";; --db-name=*) db_name="${a#--db-name=}";; --db-driver=*) db_driver="${a#--db-driver=}";; esac; done
-    if interactive; then
-      # Interactive prompts for DB
-      if [ -z "$db_user" ]; then printf "DB user [mirymesh]: "; if [ -c /dev/tty ]; then read -r tmp < /dev/tty || true; else read -r tmp || true; fi; db_user="${tmp:-mirymesh}"; fi
-      if [ -z "$db_pass" ]; then db_pass="$(openssl rand -hex 12 2>/dev/null || head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"; log "Generated DB password (will be shown once): $db_pass"; fi
-      if [ -z "$db_name" ]; then printf "DB name [mirymesh]: "; if [ -c /dev/tty ]; then read -r tmp < /dev/tty || true; else read -r tmp || true; fi; db_name="${tmp:-mirymesh}"; fi
-      if [ -z "$db_driver" ]; then printf "Driver [postgres]: "; if [ -c /dev/tty ]; then read -r tmp < /dev/tty || true; else read -r tmp || true; fi; db_driver="${tmp:-postgres}"; fi
+
+    if [ -s /etc/mirymesh/controller.env ] && grep -q '^MIRYMESH_DB_DSN=.' /etc/mirymesh/controller.env 2>/dev/null; then
+      log "Database already configured in /etc/mirymesh/controller.env — keeping it"
+    elif grep -Eq '^[[:space:]]+dsn:[[:space:]]*[^[:space:]#]' /etc/mirymesh/config.yaml 2>/dev/null; then
+      log "Database already configured in /etc/mirymesh/config.yaml — keeping it"
     else
-      db_user="${db_user:-mirymesh}"; db_name="${db_name:-mirymesh}"; db_driver="${db_driver:-postgres}"
-      if [ -z "$db_pass" ]; then db_pass="$(openssl rand -hex 12 2>/dev/null || echo mirymeshtmp)"; fi
-    fi
-    # Try to create DB
-    if [ "$db_driver" = "postgres" ] || [ "$db_driver" = "postgresql" ]; then
-      if [ "$has_pg" = "true" ]; then
-        sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='$db_name'" 2>/dev/null | grep -q 1 || sudo -u postgres psql -c "CREATE USER $db_user WITH PASSWORD '$db_pass'; CREATE DATABASE $db_name OWNER $db_user;" 2>/dev/null || log "PostgreSQL create skipped (needs sudo -u postgres or existing DB)"
-        log "PostgreSQL DSN will be postgres://$db_user:***@127.0.0.1:5432/$db_name?sslmode=disable"
-        # Saved to DB via setup (miry_setup.db_dsn_enc) — not plain config
-        DB_DSN="postgres://$db_user:$db_pass@127.0.0.1:5432/$db_name?sslmode=disable"
-        export DB_DSN
-        echo "DSN password: $db_pass (save it!)"
+      case "$db_driver" in
+        postgres|postgresql) db_driver=postgres ;;
+        mysql|mariadb) db_driver=mysql ;;
+        '') ;;
+        *) die "unsupported --db-driver '$db_driver' (use postgres or mysql)" ;;
+      esac
+      if [ -z "$db_driver" ]; then
+        if [ "$has_pg" = "true" ] && [ "$has_mysql" = "true" ]; then
+          if interactive; then
+            ask _db_choice "Database — 1) PostgreSQL  2) MySQL/MariaDB" "1"
+            case "$_db_choice" in
+              1|postgres|postgresql) db_driver=postgres ;;
+              2|mysql|mariadb) db_driver=mysql ;;
+              *) die "select 1 or 2 for the database" ;;
+            esac
+          else
+            db_driver=postgres
+            log "Both PostgreSQL and MySQL/MariaDB found — using postgres (choose with --db-driver mysql)"
+          fi
+        elif [ "$has_pg" = "true" ]; then db_driver=postgres
+        else db_driver=mysql
+        fi
       fi
-    elif [ "$db_driver" = "mysql" ] || [ "$db_driver" = "mariadb" ]; then
-      if [ "$has_mysql" = "true" ]; then
-        mysql -u root -e "CREATE DATABASE IF NOT EXISTS $db_name; CREATE USER IF NOT EXISTS '$db_user'@'localhost' IDENTIFIED BY '$db_pass'; GRANT ALL ON $db_name.* TO '$db_user'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null || log "MySQL create: try mysql -u root -p then rerun or use --skip-db-check"
-        DB_DSN="$db_user:$db_pass@tcp(127.0.0.1:3306)/$db_name"
-        export DB_DSN
-        echo "DSN password: $db_pass"
+      if [ "$db_driver" = "postgres" ] && [ "$has_pg" != "true" ]; then die "postgres selected but psql was not found"; fi
+      if [ "$db_driver" = "mysql" ] && [ "$has_mysql" != "true" ]; then die "mysql selected but neither mysql nor mariadb was found"; fi
+
+      if interactive; then
+        [ -n "$db_user" ] || ask db_user "DB user" "mirymesh"
+        [ -n "$db_name" ] || ask db_name "DB name" "mirymesh"
+      fi
+      db_user="${db_user:-mirymesh}"; db_name="${db_name:-mirymesh}"
+      db_ident_ok "$db_user" || die "invalid DB user '$db_user' (letters, digits and _ only; must not start with a digit; max 32)"
+      db_ident_ok "$db_name" || die "invalid DB name '$db_name' (letters, digits and _ only; must not start with a digit; max 32)"
+      [ -n "$db_pass" ] || db_pass="$(db_rand 12)"
+      db_pass_ok "$db_pass" || die "invalid DB password (allowed: letters, digits and . _ ~ -)"
+
+      log "Database: $db_driver (user $db_user, database $db_name)"
+      if [ "$db_driver" = "postgres" ]; then
+        if provision_pg; then
+          DB_DRIVER_FINAL=postgres
+          DB_DSN="postgres://$db_user:$db_pass@127.0.0.1:5432/$db_name?sslmode=disable"
+        fi
+      else
+        if provision_mysql; then
+          DB_DRIVER_FINAL=mysql
+          DB_DSN="$db_user:$db_pass@tcp(127.0.0.1:3306)/$db_name"
+        fi
+      fi
+      if [ -z "$DB_DSN" ]; then
+        log "The database was not set up automatically — fix the cause above and rerun, or enter the DSN on the /setup page"
       fi
     fi
   fi
 fi
-
 # Config seeding (0600, only if missing — same as postinstall.sh)
 mkdir -p /etc/mirymesh /var/lib/mirymesh /var/log/mirymesh
 chown mirymesh:mirymesh /etc/mirymesh 2>/dev/null || true
@@ -618,6 +765,8 @@ chown mirymesh:mirymesh /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
 chmod 0750 /etc/mirymesh /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
 # Remember the channel so that a later --update stays on it (a source build carries no version suffix).
 printf '%s\n' "$CHANNEL" > "$CHANNEL_FILE" 2>/dev/null || true
+# Master: pass the DB the installer just created (and the master key) to the controller.
+write_controller_env
 if [ ! -f /etc/mirymesh/config.yaml ] && [ -f "$SRC/packaging/config/config.yaml.example" ]; then
   cp "$SRC/packaging/config/config.yaml.example" /etc/mirymesh/config.yaml
   chmod 0600 /etc/mirymesh/config.yaml 2>/dev/null || true

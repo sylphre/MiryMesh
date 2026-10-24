@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `install.sh` (Master) can choose between PostgreSQL and MySQL/MariaDB when both are installed: an interactive prompt, `--db-driver postgres|mysql`, or PostgreSQL with `--yes`. New `--db-user`, `--db-name` and `--db-password` options.
+- `install.sh` creates the MySQL/MariaDB user and database (root socket login) and hands the DSN to the controller, the same as it does for PostgreSQL.
+
+### Fixed
+- `install.sh` created the PostgreSQL role but not the database. `CREATE USER` and `CREATE DATABASE` ran in one `psql -c`, which PostgreSQL rejects (`CREATE DATABASE` cannot run in a transaction block), and `2>/dev/null` hid the error. Each statement now runs separately, errors are printed, and the installer checks that it can log in over `127.0.0.1` with the new password. A rerun resets the password of an existing role instead of failing.
+- The Setup page asked for a DSN even though `install.sh` had just created the database. The installer now writes `MIRYMESH_DB_DRIVER`, `MIRYMESH_DB_DSN` and a generated `MIRYMESH_MASTER_KEY` to `/etc/mirymesh/controller.env` (root:root 0600) and loads it through a systemd drop-in, so the controller starts with the database configured. An existing master key or DB setting is kept.
+- Source builds printed a `-Wdiscarded-qualifiers` warning from the bundled go-sqlite3 C code. `install.sh` now passes `-Wno-discarded-qualifiers` to cgo for that build only.
 
 ## [1.0.0-rc.2] - 2026-10-24
 ### Fixed

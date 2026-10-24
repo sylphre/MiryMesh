@@ -46,6 +46,10 @@ DB は compose が `postgres:16` を立てるので、ローカルに用意す�
     curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash -s -- --master
 
 - 事前に PostgreSQL か MySQL / MariaDB が必要です（`apt: postgresql`、`dnf: postgresql-server / mariadb-server`）。チェックを飛ばすなら `--skip-db-check` を付けます。
+- 両方入っているときは、対話で PostgreSQL / MySQL を選べます（`--yes` では PostgreSQL）。`--db-driver postgres|mysql` で指定もできます。
+- 選んだ DB に、ユーザーとデータベースを作ります（PostgreSQL は `postgres` ユーザー経由、MySQL / MariaDB は root のソケット認証）。作成後に `127.0.0.1` へパスワードでログインできるか確かめ、失敗したらその理由を表示します。
+- 接続文字列とマスターキーは `/etc/mirymesh/controller.env`（root:root 0600）に書き、systemd の drop-in（`mirymesh-controller.service.d/10-secrets.conf`）で controller に渡します。このため Setup 画面には DSN の入力欄が出ません。マスターキーはこのファイルのバックアップを取ってください。失うと保存済みの秘密情報を復号できません。
+- すでに `controller.env` か `config.yaml` に DB の設定があるときは、何も作り直さずそのまま使います。
 - `MIRYMESH_MASTER_KEY` が必須です（[設定](#設定)）。環境変数ファイルで渡す例は [`examples/systemd/`](examples/systemd/) にあります。
 - 入れ終わったら、ブラウザで `http://127.0.0.1:9001/setup`（Tailscale 経由なら `http://<tailscale-ip>:9001/setup`）を開いて初期設定をします。
 
@@ -87,6 +91,8 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 | `--prerelease` / `--channel release\|prerelease` | prerelease チャンネルに乗る（rc を含む最新リリース、ソースビルドは `prerelease` ブランチ）。`--update` はいまのチャンネルを引き継ぎ、安定版に戻すときは `--channel release` を付ける |
 | `--no-enable` | インストールだけして起動しない |
 | `--skip-db-check` | Master の DB 有無チェックを飛ばす |
+| `--db-driver postgres\|mysql` | Master で使う DB（両方入っているときに選ぶ。省略すると対話で聞く） |
+| `--db-user NAME` / `--db-name NAME` / `--db-password PASS` | 作成する DB ユーザー、データベース名、パスワード（既定 `mirymesh` / `mirymesh` / ランダム）。名前は英数字と `_`、パスワードは英数字と `. _ ~ -` のみ |
 | `--update` | 入っている MiryMesh をその場で更新する（役割は自動判定、設定とデータは保持） |
 | `--yes` / `-y` | 何も聞かず、既定値で進める（スクリプト向け） |
 | `--no-self-update` | DataNode のワンクリック更新を有効にしない |
