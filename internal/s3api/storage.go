@@ -232,7 +232,7 @@ func (s *Storage) CreateBucket(bucket string) error {
 	}
 	s.created[bucket] = time.Now().UTC()
 	if s.db != nil {
-		if err := s.insertBucketRow(bucket, "admin"); err != nil {
+		if err := s.insertBucketRow(bucket, s.bucketOwner()); err != nil {
 			delete(s.buckets, bucket)
 			delete(s.meta, bucket)
 			delete(s.created, bucket)
@@ -241,6 +241,24 @@ func (s *Storage) CreateBucket(bucket string) error {
 		}
 	}
 	return nil
+}
+
+// defaultBucketOwner is used only when the setup row cannot be read (for
+// example before Setup has run, or on a schema without a setup row).
+const defaultBucketOwner = "admin"
+
+// bucketOwner returns the owner to record for a new bucket. buckets.owner has a
+// foreign key on setup(admin_username), so it must be the administrator name
+// chosen on the Setup page, not a fixed string.
+func (s *Storage) bucketOwner() string {
+	if s.db == nil {
+		return defaultBucketOwner
+	}
+	var owner string
+	if err := s.db.QueryRow("SELECT admin_username FROM setup WHERE id = 1").Scan(&owner); err != nil || owner == "" {
+		return defaultBucketOwner
+	}
+	return owner
 }
 
 // insertBucketRow records the bucket in the DB with a driver-specific
