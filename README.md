@@ -119,6 +119,21 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 - **Dev ビルドから上げる:** ソースからビルドした（Dev）ホストを Release / Prerelease に移すには、`--update --channel release` または `--update --prerelease` を付けて実行します。`--update` を付けずに対話式で実行した場合は、更新の前に Release / Prerelease / Dev を選べます。Master は選んだチャンネルのブランチ（`release` / `prerelease`）から入れ直し、DataNode は配布済みバイナリを入れます。設定とデータは保持されます。
 - **更新のお知らせの対象:** Master の **Settings** 画面の「更新のお知らせ」で、安定版のみ / プレリリースも / インストールのチャンネルに従う、を選べます。選んだ値は DB に保存され、`install.sh` のチャンネルや `MIRYMESH_UPDATE_PRERELEASE` より優先されます。「インストールのチャンネルに従う」を選ぶと従来の挙動に戻ります。
 
+#### ソースビルド（Dev）のノードを更新する
+
+`--dev --branch master` のようにブランチを指定してソースビルドで入れたノードは、Master の **Nodes** 画面の「更新」ボタンでは更新できません。ボタンは GitHub Releases の配布バイナリをダウンロードして差し替えるので、ブランチのビルドは配布版に置き換わってしまいます。ブランチを追う Dev ホストでは、そのホストの上で `install.sh` を再実行して更新します。
+
+- **順番:** 先に Master、次に DataNode を 1 台ずつ更新します。ノードがオンラインに戻ったのを Nodes 画面で確かめてから次へ進みます。
+- **DataNode（ソースビルド）:** 各ノードで次を実行します。ホスト上で `git clone` と `go build` が走るので、`git` と Go が必要です。役割は自動判定され、設定とデータ（`--path`）は保持されます。
+
+      curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash -s -- --update --dev --branch master
+
+- **Master（ソースビルド）:** 同じコマンドです。Master は Vue コンソールもビルドするため、Node.js 22 以上と npm も必要です。
+- 自動化するときは `--yes` を付けると、確認や選択を聞かずに進みます。
+- ブランチやタグは `--branch NAME` / `--version TAG` で変えられます（`--version` が優先）。
+- 配布版に戻したいときは、`--update --channel release`（rc を含めるなら `--update --prerelease`）を付けて実行します。
+- Dev ビルドのノードでは、Nodes 画面の「更新」ボタンを押さないでください。
+
 #### ブランチとリリースの流れ
 
 `dev` → `prerelease` → `release` の順に PR を作って merge します。release ワークフローは、merge 先のブランチでリリースの種類を決めます。
