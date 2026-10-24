@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2014-2026 Laurier Sylph. All rights reserved.
+# Builds the web console (frontend/, Vue + Vite). go:embed bakes frontend/dist into the controller,
+# so run this after checkout and before any `go build` of ./cmd/controller that must serve the UI.
+name: build web console
+description: npm ci && npm run build in frontend/, and fail if frontend/dist/index.html is missing.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "24"
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+    - name: npm ci && npm run build
+      shell: bash
+      working-directory: frontend
+      run: |
+        set -euo pipefail
+        npm ci --no-audit --no-fund
+        npm run build
+        test -s dist/index.html

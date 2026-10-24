@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-10-24
+### Fixed
+- `install.sh` source builds (Master, including the prerelease channel) installed the old Alpine.js console. `frontend/dist` is git-ignored, so a fresh clone had nothing to embed and the controller fell back to `web/static`. The installer now builds the Vue console before `go build` and stops with an error if `frontend/dist/index.html` is missing.
+- `install.sh` requires Node.js 22+ and npm on the host for Master source builds. It does not install Node.js. If either is missing or too old, it stops with an error before building, like the existing database check.
+- `install.sh` removes `/usr/share/mirymesh/static` left behind by older installs, and its setup hints now point to `/setup`.
+
+### Changed
+- The release workflow, CI (`packaging`, `setup-smoke`) and the production `Dockerfile` build `frontend/` before compiling the controller.
+- A controller built without the console now answers `503` with build instructions on non-API paths instead of serving a stale UI. `/api/*` keeps working.
+- The DEB/RPM no longer ships `/usr/share/mirymesh/static`.
+
+### Removed
+- The Alpine.js console (`web/static`, `web/templates`) and its filesystem fallback in the controller (`resolveStaticDir`, `hasTokenGin`). The old `/static/*.html` URLs still redirect to the Vue routes.
+
 ## [1.0.0-rc.1] - 2026-10-24
 ### Added
 - S3-compatible API endpoint (P0: Put/Get/Delete/List/Head, CopyObject, DeleteObjects, multipart).

@@ -102,6 +102,8 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
+      - name: build web console
+        uses: ./.github/actions/build-frontend
       - name: build controller (ephemeral)
         run: go build -o /tmp/mirymesh-controller ./cmd/controller
       - name: start controller (ephemeral dir)
@@ -131,6 +133,8 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
+      - name: build web console
+        uses: ./.github/actions/build-frontend
       - name: build binaries
         run: go build -trimpath -o /tmp/mirymesh-controller ./cmd/controller && go build -trimpath -o /tmp/mirymesh-datanode ./cmd/datanode && go build -trimpath -o /tmp/mirymesh ./cmd/mirymesh && ls -lh /tmp/mirymesh*
       - name: docker build (no push)
@@ -164,6 +168,8 @@ jobs:
           cache: true
       - name: install jq
         run: sudo apt-get update && sudo apt-get install -y jq
+      - name: build web console
+        uses: ./.github/actions/build-frontend
       - name: build controller
         run: go build -o /tmp/mirymesh-controller ./cmd/controller
       - name: start controller (tmpdir, uninitialized)
@@ -183,7 +189,6 @@ jobs:
           set -e
           # 302: note only (uninitialized admin / -> setup.html), do not hard-fail under set -e
           curl -H "Accept: text/html" http://127.0.0.1:9001/ -s -D - -o /dev/null | grep -qi "302" || echo "note: / 302 not seen (may be 200 after init) — continue"
-          curl -H "Accept: text/html" http://127.0.0.1:9001/static/index.html -s -D - -o /dev/null | grep -qi "302" || echo "note: /static/index.html 302 not seen — continue"
           # grep guard: no hardcoded Tailscale IP in prod code (review/ excluded, set -e safe)
           if grep -r "100\.114" . --include="*.go" --include="*.sh" --include="*.md" --exclude-dir=.git --exclude-dir=review 2>&1 | grep -q "100\.114"; then echo "FAIL: hardcoded 100.114 found"; grep -r "100\.114" . --include="*.go" --include="*.sh" --include="*.md" --exclude-dir=.git --exclude-dir=review 2>&1 | head -5; exit 1; fi
           echo "grep 100.114 ok"
@@ -203,7 +208,8 @@ jobs:
           CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:9001/api/admin/setup -H "Content-Type: application/json" -d '{"username":"x","password":"y"}')
           [ "$CODE" = "403" ] || [ "$CODE" = "401" ] || { echo "expected 403/401 got $CODE"; exit 1; }
           echo "2nd setup without token blocked: ok"
-          curl -sf http://127.0.0.1:9001/static/setup.html | grep -q "MiryMesh" || echo "note: static/setup.html not served (Vue build missing) — continue"
+          # The Vue console must be embedded in the binary: /setup is an SPA route that serves its index.html.
+          curl -s http://127.0.0.1:9001/setup | grep -q 'id="app"' || { echo "web console is not embedded in the controller"; exit 1; }
       - name: stop controller
         if: always()
         run: kill $(cat /tmp/mirymesh.pid) 2>/dev/null || true; rm -f /tmp/mirymesh.pid

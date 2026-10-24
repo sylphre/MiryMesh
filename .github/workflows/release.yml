@@ -35,6 +35,8 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
+      - name: build web console (embedded into the controller)
+        uses: ./.github/actions/build-frontend
       - name: decide version and release type
         env:
           INPUT_TAG: ${{ github.event.inputs.tag }}

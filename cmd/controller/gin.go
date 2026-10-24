@@ -24,7 +24,7 @@ import (
 	"github.com/sylphre/MiryMesh/internal/users"
 )
 
-func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDir string, cfg config.Config, reg *datanode.Registry, internalToken string) *gin.Engine {
+func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, cfg config.Config, reg *datanode.Registry, internalToken string) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -94,7 +94,7 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 	r.POST("/internal/restore", ginWrap(dnHandler.HandleRestore))
 	r.Any("/internal/objects/*path", ginWrap(dnHandler.HandleObjects))
 
-	// Static: prefer embed frontend/dist, fallback to filesystem distDir or staticDir
+	// Static: the Vue console embedded from frontend/dist (go:embed). Fallback: frontend/dist on disk (dev).
 	distFS, distErr := fs.Sub(frontend.Dist, "dist")
 	hasEmbedIndex := false
 	if distErr == nil {
@@ -164,19 +164,17 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, staticDi
 			c.File(filepath.Join(distDir, "index.html"))
 		})
 	} else {
-		r.Static("/static", staticDir)
-		r.GET("/", func(c *gin.Context) {
-			if !setupStore.IsInitialized() && isHTML(c) {
-				c.Redirect(302, "/static/setup.html")
+		// The binary was built without `npm run build` in frontend/. Say so instead of serving a stale UI.
+		const noConsole = "MiryMesh admin console is not built into this binary.\nRun `cd frontend && npm ci && npm run build`, then rebuild the controller.\nThe API under /api/admin is still available.\n"
+		slog.Error("admin console is not embedded: run `cd frontend && npm ci && npm run build`, then rebuild the controller")
+		r.GET("/", func(c *gin.Context) { c.String(503, noConsole) })
+		r.NoRoute(func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/api/") || strings.HasPrefix(c.Request.URL.Path, "/internal/") {
+				c.JSON(404, gin.H{"error": "not found"})
 				return
 			}
-			if setupStore.IsInitialized() && !hasTokenGin(c) && isHTML(c) {
-				c.Redirect(302, "/static/login.html")
-				return
-			}
-			c.File(filepath.Join(staticDir, "index.html"))
+			c.String(503, noConsole)
 		})
-		slog.Warn("frontend/dist not found or empty, serving from filesystem", "dir", staticDir)
 	}
 	return r
 }
@@ -314,13 +312,6 @@ func redactedLogger() gin.HandlerFunc {
 
 func isHTML(c *gin.Context) bool {
 	return strings.Contains(c.GetHeader("Accept"), "text/html")
-}
-
-func hasTokenGin(c *gin.Context) bool {
-	if c.GetHeader("X-Admin-Token") != "" || c.Query("token") != "" {
-		return true
-	}
-	return false
 }
 
 func hasFilesystemDist() bool {
