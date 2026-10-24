@@ -18,11 +18,16 @@
 #
 # Update an existing install (role is detected, config and data paths are kept):
 #   sudo bash packaging/scripts/install.sh --update [--version v1.0.0-rc.1]
+# Run interactively on a host that already has MiryMesh, only "Update" is offered.
+#
+# Dev (build from source). The default branch is `release`:
+#   sudo bash packaging/scripts/install.sh --dev [--branch NAME]
 # Never prompt (for scripts / automation): add --yes
 #
 # Env overrides:
 #   MIRYMESH_MASTER_URL=http://master:9000  # Client で Master を指定
 #   MIRYMESH_ROLE=master|client             # 対話をスキップ
+#   MIRYMESH_BRANCH=release                 # ソースビルドのブランチ (既定: release)
 set -eu
 
 MODE=""            # 空 = 自動: --client はリリースのバイナリ、--master はソースビルド
@@ -32,6 +37,7 @@ SKIP_DB_CHECK="${SKIP_DB_CHECK:-}"
 ROLE=""
 REPO=""
 MASTER_URL="${MIRYMESH_MASTER_URL:-}"
+BRANCH="${MIRYMESH_BRANCH:-}"   # ソースビルド時のブランチ。空 = release
 # Allow env override for role
 if [ -n "${MIRYMESH_ROLE:-}" ]; then
   case "$MIRYMESH_ROLE" in
@@ -50,7 +56,7 @@ _left=$#
 while [ "$_left" -gt 0 ]; do
   _opt="$1"; shift; _left=$((_left - 1))
   case "$_opt" in
-    --master-url|--pair-token|--path|--repo|--version)
+    --master-url|--pair-token|--path|--repo|--version|--branch)
       if [ "$_left" -eq 0 ]; then echo "usage: $_opt VALUE" >&2; exit 1; fi
       set -- "$@" "$_opt=$1"; shift; _left=$((_left - 1)) ;;
     *) set -- "$@" "$_opt" ;;
@@ -70,6 +76,9 @@ for arg in "$@"; do
     --path=*) DATANODE_PATHS="${DATANODE_PATHS:-} ${arg#--path=}" ;;
     --repo) echo "usage: --repo DIR" >&2; exit 1 ;;
     --repo=*) REPO="${arg#--repo=}" ;;
+    --branch) echo "usage: --branch NAME" >&2; exit 1 ;;
+    --branch=*) BRANCH="${arg#--branch=}" ;;
+    --dev) MODE="from-source" ;;
     --no-enable) NO_ENABLE=1 ;;
     --skip-db-check) SKIP_DB_CHECK=1 ;;
     --release) MODE="release" ;;
@@ -78,7 +87,7 @@ for arg in "$@"; do
     --yes|-y) ASSUME_YES=1 ;;
     --no-self-update) SELF_UPDATE=0 ;;
     --help|-h)
-      echo "usage: $0 [--master|--client] [--master-url URL] [--pair-token TOKEN] [--path /mnt/disk1] [--deb|--rpm|--from-source] [--repo DIR]"
+      echo "usage: $0 [--master|--client] [--master-url URL] [--pair-token TOKEN] [--path /mnt/disk1] [--deb|--rpm|--from-source|--dev] [--branch NAME] [--update] [--repo DIR]"
       echo "  --master   Install as Master (controller, S3 API)"
       echo "  --client   Install as Client/DataNode (needs --master-url or MIRYMESH_MASTER_URL)"
       echo "  --pair-token  One-time pairing token (from POST /api/admin/pair-token)"
@@ -86,11 +95,13 @@ for arg in "$@"; do
       echo "  --release  Install the prebuilt DataNode from GitHub Releases (default for --client)"
       echo "  --version  Release tag used by --release, e.g. v0.1.0 (default: latest)"
       echo "  --from-source  Build with Go (default for --master)"
+      echo "  --dev      Dev: build from source (same as --from-source; for --client too)"
+      echo "  --branch   Branch used for source builds (default: release; --version TAG wins)"
       echo "  --skip-db-check  Master: skip the PostgreSQL/MySQL presence check"
       echo "  --update   Update an existing install in place (role and config are kept; --version TAG pins the release)"
       echo "  --yes, -y  Never prompt, use defaults (for scripts)"
       echo "  --no-self-update  DataNode: do not enable one-click update from the Master"
-      echo "  No args    Interactive selection (Master / Client)"
+      echo "  No args    Interactive selection (Master / Client). If MiryMesh is already installed: Update only"
       exit 0
       ;;
     *) echo "unknown arg: $arg" >&2; echo "try: $0 --help" >&2; exit 1 ;;
@@ -121,15 +132,44 @@ ask() {
   eval "$_a_var=\$_a_ans"
 }
 
+# --branch only makes sense for a source build.
+if [ -z "$MODE" ] && [ -n "$BRANCH" ]; then MODE="from-source"; fi
+
+# What is installed on this host? Prints "master", "client" or nothing.
+detect_installed_role() {
+  if [ -f /etc/systemd/system/mirymesh-controller.service ] || [ -x /usr/local/bin/mirymesh-controller ] || [ -x /usr/bin/mirymesh-controller ]; then
+    echo "master"
+  elif [ -f /etc/systemd/system/mirymesh-datanode.service ] || [ -x /usr/local/bin/mirymesh-datanode ] || [ -x /usr/bin/mirymesh-datanode ]; then
+    echo "client"
+  fi
+}
+INSTALLED_ROLE="$(detect_installed_role)"
+
+# Interactive run on a host that already has MiryMesh: offer Update only.
+# Role, gateway and install-type questions are skipped, the run continues like "--update".
+# An explicit --master / --client (or MIRYMESH_ROLE) still means a fresh install.
+if [ -z "$UPDATE" ] && [ -z "$ROLE" ] && [ -n "$INSTALLED_ROLE" ] && interactive; then
+  _v=""
+  for _b in /usr/local/bin/mirymesh-datanode /usr/bin/mirymesh-datanode; do
+    if [ -x "$_b" ]; then
+      if command -v timeout >/dev/null 2>&1; then
+        _v="$(timeout 5 "$_b" --version 2>/dev/null | head -1 || true)"
+      else
+        _v="$("$_b" --version 2>/dev/null | head -1 || true)"
+      fi
+      break
+    fi
+  done
+  printf "MiryMesh is already installed on this host (role: %s%s).\n" "$INSTALLED_ROLE" "${_v:+, $_v}"
+  ask ans "Update it now? (Y/n)" "Y"
+  case "$ans" in n|N|no|NO) die "aborted" ;; esac
+  UPDATE=1; ASSUME_YES=1; SKIP_DB_CHECK=1; HAVE_TTY=""
+fi
+
 # --update: find out what is installed here.
 if [ -n "$UPDATE" ] && [ -z "$ROLE" ]; then
-  if [ -f /etc/systemd/system/mirymesh-controller.service ] || [ -x /usr/local/bin/mirymesh-controller ] || [ -x /usr/bin/mirymesh-controller ]; then
-    ROLE="master"
-  elif [ -f /etc/systemd/system/mirymesh-datanode.service ] || [ -x /usr/local/bin/mirymesh-datanode ] || [ -x /usr/bin/mirymesh-datanode ]; then
-    ROLE="client"
-  else
-    die "--update: no MiryMesh install found on this host (run without --update to install)"
-  fi
+  ROLE="$INSTALLED_ROLE"
+  [ -n "$ROLE" ] || die "--update: no MiryMesh install found on this host (run without --update to install)"
   log "Update: detected role $ROLE (pass --master or --client to override)"
 fi
 
@@ -181,8 +221,21 @@ if [ "$ROLE" = "client" ] && [ -z "$UPDATE" ]; then
   fi
 fi
 
+# Install type (fresh installs only): Release, or Dev = build from source (default branch: release).
+if [ -z "$UPDATE" ] && [ -z "$MODE" ] && interactive; then
+  if [ "$ROLE" = "client" ]; then _rel="prebuilt DataNode from GitHub Releases"; else _rel="built from source, release branch"; fi
+  printf "Install type — 1) Release (%s)  2) Dev (build from source, you pick the branch)\n" "$_rel"
+  ask ans "Select 1 or 2" "1"
+  case "$ans" in
+    2|dev|Dev|DEV|d|D)
+      MODE="from-source"
+      [ -n "$BRANCH" ] || ask BRANCH "Branch to build" "release"
+      ;;
+  esac
+fi
+
 if interactive; then
-  log "Plan: role=$ROLE${MASTER_URL:+ master=$MASTER_URL}${DATANODE_PATHS:+ paths=$DATANODE_PATHS}"
+  log "Plan: role=$ROLE${MASTER_URL:+ master=$MASTER_URL}${DATANODE_PATHS:+ paths=$DATANODE_PATHS}${MODE:+ mode=$MODE}${BRANCH:+ branch=$BRANCH}"
   ask ans "Proceed? (Y/n)" "Y"
   case "$ans" in n|N|no|NO) die "aborted" ;; esac
 fi
@@ -264,12 +317,11 @@ else
   command -v git >/dev/null 2>&1 || die "git not found — install git then rerun"
   SRC="$(mktemp -d /tmp/mirymesh-src.XXXXXX)"
   trap 'rm -rf "$SRC"' EXIT
-  log "Cloning MiryMesh${VERSION:+ $VERSION} to $SRC"
-  if [ -n "$VERSION" ]; then
-    git clone --depth 1 --branch "$VERSION" https://github.com/sylphre/MiryMesh "$SRC"
-  else
-    git clone --depth 1 https://github.com/sylphre/MiryMesh "$SRC"
-  fi
+  # Pinned tag (--version) > chosen branch (--branch / Dev) > the release branch.
+  _ref="${VERSION:-${BRANCH:-release}}"
+  log "Cloning MiryMesh ($_ref) to $SRC"
+  git clone --depth 1 --branch "$_ref" https://github.com/sylphre/MiryMesh "$SRC" \
+    || die "could not clone '$_ref' from GitHub — check the branch/tag name (--branch NAME / --version TAG)"
 fi
 log "Source: $SRC"
 

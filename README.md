@@ -82,6 +82,8 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 | `--path DIR` | DataNode の保存先（複数指定可、既定 `/var/lib/mirymesh/data`） |
 | `--release` / `--version TAG` | リリースのバイナリを使う / タグを固定する（`--client` の既定は `--release`） |
 | `--from-source` / `--deb` / `--rpm` | ソースビルド（`--master` の既定）/ DEB / RPM から入れる |
+| `--dev` | Dev。ソースからビルドして入れる（`--client` でも使えます） |
+| `--branch NAME` | ソースビルドに使うブランチ（既定 `release`。`--version TAG` を付けた場合はそちらが優先） |
 | `--no-enable` | インストールだけして起動しない |
 | `--skip-db-check` | Master の DB 有無チェックを飛ばす |
 | `--update` | 入っている MiryMesh をその場で更新する（役割は自動判定、設定とデータは保持） |
@@ -90,7 +92,9 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 
 #### 対話式で入れる
 
-`--master` / `--client` を付けずに実行すると、役割、Master の URL、ペアリングトークン、保存先を順に聞き、最後に内容を確認します。`curl ... | sudo bash` のようにパイプで渡した場合も、端末（`/dev/tty`）から読みます。聞かれたくないとき（自動化など）は `--yes` を付けます。
+すでに MiryMesh が入っているホストで `--master` / `--client` を付けずに実行すると、役割などは聞かず「更新しますか？」だけを聞きます。Dev ビルドで更新するときは `--update --dev [--branch NAME]` を付けます。入れ直したいときは `--master` / `--client` を付けて実行します。
+
+まだ入っていないホストで `--master` / `--client` を付けずに実行すると、役割、インストール方法（Release または Dev）、Master の URL、ペアリングトークン、保存先を順に聞き、最後に内容を確認します。Release は `--client` ならビルド済みの DataNode、`--master` なら `release` ブランチからのソースビルドです。Dev はソースからビルドし、ブランチを指定できます（既定は `release`）。`curl ... | sudo bash` のようにパイプで渡した場合も、端末（`/dev/tty`）から読みます。聞かれたくないとき（自動化など）は `--yes` を付けます。
 
 #### 更新する
 

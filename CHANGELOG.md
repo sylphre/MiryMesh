@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Update notice: the Master checks GitHub Releases (`GET /api/admin/update`, `POST /api/admin/update/check`) and the console shows a dismissible banner when a newer version exists.
 - One-click DataNode update: the Nodes page shows each node's version and an "更新" button (`POST /api/admin/nodes/update`). The DataNode downloads the release binary, verifies it against `SHA256SUMS`, stages it and exits with code 75. A root-owned `ExecStartPre` helper installed by `install.sh` replaces the binary (previous one kept as `.prev`) before systemd restarts the service. Run `install.sh --update` once on each existing node to enable it, or pass `--no-self-update` to opt out.
 - DataNodes report their version when registering.
+- `install.sh`: on a host that already has MiryMesh, the interactive run offers only "Update". New `--dev` and `--branch NAME` build from source; source builds (and the source fallback) now clone the `release` branch by default, and `--version TAG` still takes precedence. A fresh interactive install asks for Release or Dev.
 
 ## [0.0.0-dev] - Initial
 - Repository scaffolding and Phase 0 baseline.
