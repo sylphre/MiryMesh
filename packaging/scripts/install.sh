@@ -20,7 +20,13 @@
 #   sudo bash packaging/scripts/install.sh --update [--version v1.0.0-rc.1]
 # Run interactively on a host that already has MiryMesh, only "Update" is offered.
 #
-# Dev (build from source). The default branch is `release`:
+# Branches: dev > prerelease > release. Pre-releases (rc) are published from `prerelease`,
+# stable releases from `release`.
+#   sudo bash packaging/scripts/install.sh --prerelease                 # follow the prerelease channel
+#   sudo bash packaging/scripts/install.sh --update --channel release   # back to the stable channel
+# An update stays on the channel the host is on (MIRYMESH_CHANNEL=release|prerelease also works).
+#
+# Dev (build from source). The default branch is `release` (`prerelease` with --prerelease):
 #   sudo bash packaging/scripts/install.sh --dev [--branch NAME]
 # Never prompt (for scripts / automation): add --yes
 #
@@ -51,12 +57,14 @@ PAIR_TOKEN=""
 UPDATE=""
 ASSUME_YES=""
 SELF_UPDATE="1"
+CHANNEL="${MIRYMESH_CHANNEL:-}"   # release | prerelease. Empty = decided below
+CHANNEL_FILE=/etc/mirymesh/channel
 # "--opt VALUE" と "--opt=VALUE" の両方を受け付ける。前者を後者に書き換えて、後段の case で扱う。
 _left=$#
 while [ "$_left" -gt 0 ]; do
   _opt="$1"; shift; _left=$((_left - 1))
   case "$_opt" in
-    --master-url|--pair-token|--path|--repo|--version|--branch)
+    --master-url|--pair-token|--path|--repo|--version|--branch|--channel)
       if [ "$_left" -eq 0 ]; then echo "usage: $_opt VALUE" >&2; exit 1; fi
       set -- "$@" "$_opt=$1"; shift; _left=$((_left - 1)) ;;
     *) set -- "$@" "$_opt" ;;
@@ -78,6 +86,9 @@ for arg in "$@"; do
     --repo=*) REPO="${arg#--repo=}" ;;
     --branch) echo "usage: --branch NAME" >&2; exit 1 ;;
     --branch=*) BRANCH="${arg#--branch=}" ;;
+    --channel) echo "usage: --channel release|prerelease" >&2; exit 1 ;;
+    --channel=*) CHANNEL="${arg#--channel=}" ;;
+    --prerelease) CHANNEL="prerelease" ;;
     --dev) MODE="from-source" ;;
     --no-enable) NO_ENABLE=1 ;;
     --skip-db-check) SKIP_DB_CHECK=1 ;;
@@ -87,7 +98,7 @@ for arg in "$@"; do
     --yes|-y) ASSUME_YES=1 ;;
     --no-self-update) SELF_UPDATE=0 ;;
     --help|-h)
-      echo "usage: $0 [--master|--client] [--master-url URL] [--pair-token TOKEN] [--path /mnt/disk1] [--deb|--rpm|--from-source|--dev] [--branch NAME] [--update] [--repo DIR]"
+      echo "usage: $0 [--master|--client] [--master-url URL] [--pair-token TOKEN] [--path /mnt/disk1] [--deb|--rpm|--from-source|--dev] [--branch NAME] [--prerelease] [--update] [--repo DIR]"
       echo "  --master   Install as Master (controller, S3 API)"
       echo "  --client   Install as Client/DataNode (needs --master-url or MIRYMESH_MASTER_URL)"
       echo "  --pair-token  One-time pairing token (from POST /api/admin/pair-token)"
@@ -96,7 +107,9 @@ for arg in "$@"; do
       echo "  --version  Release tag used by --release, e.g. v0.1.0 (default: latest)"
       echo "  --from-source  Build with Go (default for --master)"
       echo "  --dev      Dev: build from source (same as --from-source; for --client too)"
-      echo "  --branch   Branch used for source builds (default: release; --version TAG wins)"
+      echo "  --branch   Branch used for source builds (default: release, or prerelease with --prerelease; --version TAG wins)"
+      echo "  --prerelease  Follow the prerelease channel: newest release including pre-releases, and the prerelease branch for source builds"
+      echo "  --channel  release|prerelease. --update keeps the channel the host is on unless this is given"
       echo "  --skip-db-check  Master: skip the PostgreSQL/MySQL presence check"
       echo "  --update   Update an existing install in place (role and config are kept; --version TAG pins the release)"
       echo "  --yes, -y  Never prompt, use defaults (for scripts)"
@@ -107,6 +120,12 @@ for arg in "$@"; do
     *) echo "unknown arg: $arg" >&2; echo "try: $0 --help" >&2; exit 1 ;;
   esac
 done
+
+case "$CHANNEL" in
+  ""|release|prerelease) ;;
+  stable) CHANNEL="release" ;;
+  *) echo "unknown channel '$CHANNEL' (release|prerelease)" >&2; exit 1 ;;
+esac
 
 log() { printf "[install] %s\n" "$*"; }
 die() { printf "error: %s\n" "$*" >&2; exit 1; }
@@ -145,21 +164,38 @@ detect_installed_role() {
 }
 INSTALLED_ROLE="$(detect_installed_role)"
 
+# Version of the installed binary (one line, empty when it cannot be run).
+installed_version() {
+  for _iv_b in /usr/local/bin/mirymesh-datanode /usr/bin/mirymesh-datanode /usr/local/bin/mirymesh-controller /usr/bin/mirymesh-controller; do
+    if [ -x "$_iv_b" ]; then
+      if command -v timeout >/dev/null 2>&1; then
+        timeout 5 "$_iv_b" --version 2>/dev/null | head -1 || true
+      else
+        "$_iv_b" --version 2>/dev/null | head -1 || true
+      fi
+      return 0
+    fi
+  done
+  return 0
+}
+
+# Channel of the existing install. Prints "prerelease" when the installed version has a pre-release
+# suffix (v1.0.0-rc.1) or the channel recorded by a previous run says so. Prints nothing otherwise.
+detect_installed_channel() {
+  case "$(installed_version)" in
+    v[0-9]*-*) echo "prerelease"; return 0 ;;
+  esac
+  if [ -f "$CHANNEL_FILE" ] && [ "$(head -1 "$CHANNEL_FILE" 2>/dev/null)" = "prerelease" ]; then
+    echo "prerelease"
+  fi
+  return 0
+}
+
 # Interactive run on a host that already has MiryMesh: offer Update only.
 # Role, gateway and install-type questions are skipped, the run continues like "--update".
 # An explicit --master / --client (or MIRYMESH_ROLE) still means a fresh install.
 if [ -z "$UPDATE" ] && [ -z "$ROLE" ] && [ -n "$INSTALLED_ROLE" ] && interactive; then
-  _v=""
-  for _b in /usr/local/bin/mirymesh-datanode /usr/bin/mirymesh-datanode; do
-    if [ -x "$_b" ]; then
-      if command -v timeout >/dev/null 2>&1; then
-        _v="$(timeout 5 "$_b" --version 2>/dev/null | head -1 || true)"
-      else
-        _v="$("$_b" --version 2>/dev/null | head -1 || true)"
-      fi
-      break
-    fi
-  done
+  _v="$(installed_version)"
   printf "MiryMesh is already installed on this host (role: %s%s).\n" "$INSTALLED_ROLE" "${_v:+, $_v}"
   ask ans "Update it now? (Y/n)" "Y"
   case "$ans" in n|N|no|NO) die "aborted" ;; esac
@@ -171,6 +207,12 @@ if [ -n "$UPDATE" ] && [ -z "$ROLE" ]; then
   ROLE="$INSTALLED_ROLE"
   [ -n "$ROLE" ] || die "--update: no MiryMesh install found on this host (run without --update to install)"
   log "Update: detected role $ROLE (pass --master or --client to override)"
+fi
+
+# --update stays on the channel the host is on, unless --channel / --prerelease says otherwise.
+if [ -n "$UPDATE" ] && [ -z "$CHANNEL" ]; then
+  CHANNEL="$(detect_installed_channel)"
+  [ -z "$CHANNEL" ] || log "Update: this host follows the $CHANNEL channel (leave it with --channel release)"
 fi
 
 # Interactive selection if no role given
@@ -221,21 +263,28 @@ if [ "$ROLE" = "client" ] && [ -z "$UPDATE" ]; then
   fi
 fi
 
-# Install type (fresh installs only): Release, or Dev = build from source (default branch: release).
-if [ -z "$UPDATE" ] && [ -z "$MODE" ] && interactive; then
-  if [ "$ROLE" = "client" ]; then _rel="prebuilt DataNode from GitHub Releases"; else _rel="built from source, release branch"; fi
-  printf "Install type — 1) Release (%s)  2) Dev (build from source, you pick the branch)\n" "$_rel"
-  ask ans "Select 1 or 2" "1"
+# Install type (fresh installs only): Release, Prerelease (rc), or Dev = build from source (default branch: release).
+if [ -z "$UPDATE" ] && [ -z "$MODE" ] && [ -z "$CHANNEL" ] && interactive; then
+  if [ "$ROLE" = "client" ]; then
+    _rel="prebuilt DataNode from GitHub Releases"; _pre="prebuilt DataNode, newest incl. pre-releases"
+  else
+    _rel="built from source, release branch"; _pre="built from source, prerelease branch"
+  fi
+  printf "Install type — 1) Release (%s)  2) Prerelease (%s)  3) Dev (build from source, you pick the branch)\n" "$_rel" "$_pre"
+  ask ans "Select 1, 2 or 3" "1"
   case "$ans" in
-    2|dev|Dev|DEV|d|D)
+    2|pre|prerelease|Prerelease|p|P) CHANNEL="prerelease" ;;
+    3|dev|Dev|DEV|d|D)
       MODE="from-source"
       [ -n "$BRANCH" ] || ask BRANCH "Branch to build" "release"
       ;;
   esac
 fi
 
+[ -n "$CHANNEL" ] || CHANNEL="release"
+
 if interactive; then
-  log "Plan: role=$ROLE${MASTER_URL:+ master=$MASTER_URL}${DATANODE_PATHS:+ paths=$DATANODE_PATHS}${MODE:+ mode=$MODE}${BRANCH:+ branch=$BRANCH}"
+  log "Plan: role=$ROLE${MASTER_URL:+ master=$MASTER_URL}${DATANODE_PATHS:+ paths=$DATANODE_PATHS}${MODE:+ mode=$MODE}${BRANCH:+ branch=$BRANCH} channel=$CHANNEL"
   ask ans "Proceed? (Y/n)" "Y"
   case "$ans" in n|N|no|NO) die "aborted" ;; esac
 fi
@@ -267,7 +316,13 @@ install_release() {
   esac
   command -v curl >/dev/null 2>&1 || { log "curl not found"; return 1; }
   command -v sha256sum >/dev/null 2>&1 || { log "sha256sum not found"; return 1; }
-  if [ -z "$VERSION" ] && ! curl -fsSIL -o /dev/null "$RELEASE_BASE/latest/download/SHA256SUMS" 2>/dev/null; then
+  if [ -z "$VERSION" ] && [ "$CHANNEL" = "prerelease" ]; then
+    _t="$(resolve_latest_tag || true)"
+    case "$_t" in
+      v[0-9]*) VERSION="$_t"; log "Prerelease channel — using the newest release $VERSION" ;;
+      *) log "Prerelease channel: could not look up the newest release"; return 1 ;;
+    esac
+  elif [ -z "$VERSION" ] && ! curl -fsSIL -o /dev/null "$RELEASE_BASE/latest/download/SHA256SUMS" 2>/dev/null; then
     _t="$(resolve_latest_tag || true)"
     case "$_t" in
       v[0-9]*) VERSION="$_t"; log "No stable release yet — using the newest pre-release $VERSION" ;;
@@ -317,8 +372,10 @@ else
   command -v git >/dev/null 2>&1 || die "git not found — install git then rerun"
   SRC="$(mktemp -d /tmp/mirymesh-src.XXXXXX)"
   trap 'rm -rf "$SRC"' EXIT
-  # Pinned tag (--version) > chosen branch (--branch / Dev) > the release branch.
-  _ref="${VERSION:-${BRANCH:-release}}"
+  # Pinned tag (--version) > chosen branch (--branch / Dev) > the channel's branch (release, or prerelease).
+  _def_branch="release"
+  [ "$CHANNEL" != "prerelease" ] || _def_branch="prerelease"
+  _ref="${VERSION:-${BRANCH:-$_def_branch}}"
   log "Cloning MiryMesh ($_ref) to $SRC"
   git clone --depth 1 --branch "$_ref" https://github.com/sylphre/MiryMesh "$SRC" \
     || die "could not clone '$_ref' from GitHub — check the branch/tag name (--branch NAME / --version TAG)"
@@ -527,6 +584,8 @@ mkdir -p /etc/mirymesh /var/lib/mirymesh /var/log/mirymesh
 chown mirymesh:mirymesh /etc/mirymesh 2>/dev/null || true
 chown mirymesh:mirymesh /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
 chmod 0750 /etc/mirymesh /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
+# Remember the channel so that a later --update stays on it (a source build carries no version suffix).
+printf '%s\n' "$CHANNEL" > "$CHANNEL_FILE" 2>/dev/null || true
 if [ ! -f /etc/mirymesh/config.yaml ] && [ -f "$SRC/packaging/config/config.yaml.example" ]; then
   cp "$SRC/packaging/config/config.yaml.example" /etc/mirymesh/config.yaml
   chmod 0600 /etc/mirymesh/config.yaml 2>/dev/null || true
@@ -629,6 +688,22 @@ ExecStart=
 ExecStart=$_dn_bin --pair-token \${PAIR_TOKEN} /etc/mirymesh/config.yaml
 CONF
   log "Pair token configured (one-time; removed after the first successful pairing)"
+fi
+# Master: the update notice follows pre-releases only on the prerelease channel.
+# (A Master that runs a pre-release build, or a "dev" source build, follows them anyway.)
+if [ "$ROLE" = "master" ]; then
+  _ch_conf=/etc/systemd/system/mirymesh-controller.service.d/40-channel.conf
+  if [ "$CHANNEL" = "prerelease" ]; then
+    mkdir -p /etc/systemd/system/mirymesh-controller.service.d
+    cat > "$_ch_conf" <<CONF
+# Written by install.sh (prerelease channel). Makes the update notice follow pre-releases.
+[Service]
+Environment=MIRYMESH_UPDATE_PRERELEASE=1
+CONF
+    log "Channel: prerelease (the update notice also offers pre-releases)"
+  else
+    rm -f "$_ch_conf"
+  fi
 fi
 # Edit hint
 if [ "$ROLE" = "client" ]; then
