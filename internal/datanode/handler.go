@@ -48,6 +48,8 @@ type Handler struct {
 	updater *Updater
 	// tokens holds the random per-node tokens (Master side, optional).
 	tokens NodeTokenStore
+	// pathAdder adds a data path at runtime (DataNode side, optional).
+	pathAdder func(path string) (string, bool, error)
 }
 
 // NewHandler creates a Handler.
@@ -79,6 +81,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/internal/adopt", h.handleAdopt)
 	// Master-triggered self-update (needs the node token; 404 unless an updater is installed)
 	mux.HandleFunc("/internal/update", h.handleUpdate)
+	mux.HandleFunc("/internal/paths", h.handlePaths)
 }
 
 type registerReq struct {

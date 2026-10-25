@@ -28,6 +28,10 @@ const adopt = reactive({ addr: '', controllerUrl: origin })
 const masterVersion = ref('')
 const updating = ref('')
 
+const showDisk = ref(false)
+const addingDisk = ref(false)
+const diskForm = reactive({ nodeId: '', path: '' })
+
 async function load() {
   try {
     const [n, d] = await Promise.all([api('/api/admin/nodes'), api('/api/admin/disks')])
@@ -122,6 +126,30 @@ async function updateNode(n) {
   }
 }
 
+function openAddDisk(n) {
+  diskForm.nodeId = n.ID
+  diskForm.path = ''
+  showDisk.value = true
+}
+
+async function addDisk() {
+  if (addingDisk.value) return
+  addingDisk.value = true
+  try {
+    const j = await api('/api/admin/nodes/disks', {
+      method: 'POST',
+      body: { node_id: diskForm.nodeId, path: diskForm.path.trim() },
+    })
+    toastOk(j && j.added === false ? 'このディスクは既に登録されています' : 'ディスクを追加しました。数秒後に一覧へ反映されます')
+    showDisk.value = false
+    setTimeout(load, 2000)
+  } catch (e) {
+    toastErr(e)
+  } finally {
+    addingDisk.value = false
+  }
+}
+
 const installCmd = computed(
   () => `curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash -s -- --client --master-url ${origin} --pair-token ${pairToken.value} --path /mnt/disk1`,
 )
@@ -196,6 +224,9 @@ const daemonCmd = computed(
               <td :title="formatDate(n.LastSeen)">{{ timeAgo(n.LastSeen) }}</td>
               <td class="mono">{{ n.Version || '—' }}</td>
               <td class="num">
+                <button v-if="n.Status === 'online'" type="button" class="btn btn--sm" style="margin-inline-end: 0.5rem" @click="openAddDisk(n)">
+                  <Icon name="plus" :size="14" />ディスク追加
+                </button>
                 <button v-if="canUpdate(n)" type="button" class="btn btn--sm" :disabled="updating === n.ID" @click="updateNode(n)">
                   <span v-if="updating === n.ID" class="spinner" aria-hidden="true"></span>
                   <Icon v-else name="refresh" :size="14" />更新
@@ -232,6 +263,34 @@ const daemonCmd = computed(
       </div>
       <template #footer>
         <button type="button" class="btn" data-autofocus @click="showPair = false">閉じる</button>
+      </template>
+    </Modal>
+
+    <Modal v-model="showDisk" title="ディスクを追加">
+      <form id="disk-form" class="stack" @submit.prevent="addDisk">
+        <div class="alert alert--warning">
+          <Icon name="alert" />
+          <div class="alert__body">
+            ディスクは追加のみ可能で、削除や縮小はできません。パスは DataNode の systemd が書き込める場所
+            （<code>/var/lib/mirymesh</code> 配下、または <code>install.sh --path</code> で許可済みのパス）である必要があります。
+          </div>
+        </div>
+        <div class="field">
+          <span class="field__label">Node</span>
+          <div class="mono">{{ diskForm.nodeId }}</div>
+        </div>
+        <label class="field">
+          <span class="field__label">追加するディレクトリ</span>
+          <input v-model="diskForm.path" class="input mono" required autocomplete="off" placeholder="/mnt/disk2" data-autofocus />
+          <span class="field__hint">DataNode 上の絶対パスを指定します。再起動後も保持されます。</span>
+        </label>
+      </form>
+      <template #footer>
+        <button type="button" class="btn" @click="showDisk = false">キャンセル</button>
+        <button type="submit" form="disk-form" class="btn btn--primary" :disabled="addingDisk">
+          <span v-if="addingDisk" class="spinner" aria-hidden="true"></span>
+          追加
+        </button>
       </template>
     </Modal>
 

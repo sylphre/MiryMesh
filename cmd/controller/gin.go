@@ -79,6 +79,7 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, cfg conf
 	adminG.POST("/update/check", ginWrapAuth(h, h.HandleUpdateCheck))
 	adminG.PUT("/update/settings", ginWrapAuth(h, h.HandleUpdateSettings))
 	adminG.POST("/nodes/update", ginWrapAuth(h, h.HandleNodeUpdate))
+	adminG.POST("/nodes/disks", ginWrapAuth(h, h.HandleNodeDisks))
 	adminG.GET("/config", ginWrap(h.HandleConfig))
 	adminG.PUT("/config/policy", ginWrapAuth(h, h.HandleConfigPolicy))
 	adminG.GET("/region", ginWrapAuth(h, h.HandleRegion))

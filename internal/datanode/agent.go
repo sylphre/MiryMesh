@@ -41,6 +41,7 @@ type Agent struct {
 	haveNodeToken bool   // token currently holds a controller-issued node token
 	tokenFile     string
 	onNodeToken   func(string)
+	extraPaths    []string // data paths added at runtime (AddPath)
 }
 
 // NewAgent creates an agent from config. NodeID defaults to hostname.
@@ -266,7 +267,7 @@ func (a *Agent) ReportDisks() error {
 	if base == "" {
 		return nil
 	}
-	for _, p := range a.cfg.Datanode.Paths {
+	for _, p := range a.diskPaths() {
 		capacity, used := diskUsage(p)
 		body, _ := json.Marshal(map[string]any{
 			"node_id":  a.nodeID,

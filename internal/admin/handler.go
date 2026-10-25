@@ -72,6 +72,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/health", h.handleHealth)
 	mux.HandleFunc("/api/admin/nodes", h.handleNodes)
 	mux.HandleFunc("/api/admin/nodes/update", h.HandleNodeUpdate)
+	mux.HandleFunc("/api/admin/nodes/disks", h.HandleNodeDisks)
 	mux.HandleFunc("/api/admin/update", h.HandleUpdateInfo)
 	mux.HandleFunc("/api/admin/update/check", h.HandleUpdateCheck)
 	mux.HandleFunc("/api/admin/update/settings", h.HandleUpdateSettings)

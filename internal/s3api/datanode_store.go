@@ -9,6 +9,7 @@ import (
 	"io"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/sylphre/MiryMesh/internal/datanode"
 )
@@ -18,11 +19,13 @@ import (
 // datanode), so the conversion between the two metadata types lives here.
 type DataNodeStore struct {
 	store ObjectStore
-	// disks maps a cleaned, configured disk path to its store. It is read-only
-	// after construction, so it needs no lock.
+	// mu guards disks and all, which AddDisk can extend while requests are served.
+	mu sync.RWMutex
+	// disks maps a cleaned, configured disk path to its store.
 	disks map[string]ObjectStore
 	// all lists the stores searched when a request names no disk: the default
-	// store first, then the other disks in path order. Empty means single-disk.
+	// store first, then the other disks in path order (disks added later are
+	// appended). Empty means single-disk.
 	all []ObjectStore
 }
 
@@ -56,12 +59,41 @@ func NewDataNodeStoreWithDisks(store ObjectStore, disks map[string]ObjectStore) 
 	return &DataNodeStore{store: store, disks: cleaned, all: all}
 }
 
-// stores returns the stores to search when a request names no disk.
+// AddDisk makes path a configured disk while the DataNode is running. Adding a
+// path that is already configured is a no-op. Disks can only be added.
+func (d *DataNodeStore) AddDisk(path string, s ObjectStore) error {
+	if s == nil {
+		return errors.New("disk store must not be nil")
+	}
+	p := filepath.Clean(path)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d.disks[p]; ok {
+		return nil
+	}
+	if d.disks == nil {
+		d.disks = make(map[string]ObjectStore)
+	}
+	if len(d.all) == 0 {
+		d.all = []ObjectStore{d.store}
+	}
+	d.disks[p] = s
+	if s != d.store {
+		d.all = append(d.all, s)
+	}
+	return nil
+}
+
+// stores returns a snapshot of the stores to search when a request names no disk.
 func (d *DataNodeStore) stores() []ObjectStore {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	if len(d.all) == 0 {
 		return []ObjectStore{d.store}
 	}
-	return d.all
+	out := make([]ObjectStore, len(d.all))
+	copy(out, d.all)
+	return out
 }
 
 // Disk implements datanode.DiskResolver. It returns the store for one
@@ -69,7 +101,9 @@ func (d *DataNodeStore) stores() []ObjectStore {
 // Paths that are not configured disks are rejected, so a caller cannot make
 // the DataNode write outside its configured directories.
 func (d *DataNodeStore) Disk(path, bucket string) (datanode.ObjectAPI, error) {
+	d.mu.RLock()
 	ds, ok := d.disks[filepath.Clean(path)]
+	d.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("disk %q is not configured on this node", path)
 	}
@@ -171,8 +205,9 @@ func (d *DataNodeStore) DeleteObject(bucket, key string) error {
 // not have the bucket is skipped as long as one disk could list it.
 func (d *DataNodeStore) ListObjectsV2(bucket, prefix, delimiter, continuationToken string, maxKeys int) (datanode.ObjectListing, error) {
 	var firstErr error
-	pages := make([]ListObjectsV2Result, 0, len(d.stores()))
-	for _, s := range d.stores() {
+	stores := d.stores()
+	pages := make([]ListObjectsV2Result, 0, len(stores))
+	for _, s := range stores {
 		res, err := s.ListObjectsV2(bucket, prefix, delimiter, continuationToken, maxKeys)
 		if err != nil {
 			if firstErr == nil {
