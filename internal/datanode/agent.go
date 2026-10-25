@@ -42,6 +42,7 @@ type Agent struct {
 	tokenFile     string
 	onNodeToken   func(string)
 	extraPaths    []string // data paths added at runtime (AddPath)
+	dialAs        string   // host name the Master dials when nodeID came from datanode.id and differs from it
 }
 
 // NewAgent creates an agent from config. NodeID defaults to hostname.
@@ -73,6 +74,9 @@ func (a *Agent) Bind(tokenFile string, onNodeToken func(string)) {
 	if tokenFile == "" {
 		return
 	}
+	// The node ID is kept next to the token, so a new container or a renamed host
+	// does not turn a paired node into an unknown one.
+	a.loadNodeID(filepath.Join(filepath.Dir(tokenFile), nodeIDFile))
 	b, err := os.ReadFile(filepath.Clean(tokenFile))
 	if err != nil {
 		return
@@ -374,7 +378,7 @@ func (a *Agent) listenAddr() string {
 	if _, p, err := net.SplitHostPort(strings.TrimSpace(a.cfg.Datanode.Listen)); err == nil && p != "" {
 		port = p
 	}
-	return net.JoinHostPort(a.nodeID, port)
+	return net.JoinHostPort(a.dialHost(), port)
 }
 
 func diskUsage(path string) (capacity, used int64) {

@@ -201,16 +201,11 @@ func (r *RemoteStore) PutObject(bucket, key string, contentType string, meta map
 		return ObjectMeta{}, errNoSuchBucket
 	}
 	// Stream the body to the DataNode. The placement engine needs the size up
-	// front: the S3 handler passes it with withSizeHint. Without it the body is
-	// spooled to a temporary file (disk, not memory) to learn the size.
+	// front: the S3 handler passes it with withSizeHint. The Master keeps no
+	// files, so a body of unknown size is refused instead of spooled to disk.
 	size := bodySizeHint(body)
 	if size < 0 {
-		spool, n, cleanup, spoolErr := spoolBody(body)
-		if spoolErr != nil {
-			return ObjectMeta{}, spoolErr
-		}
-		defer cleanup()
-		body, size = spool, n
+		return ObjectMeta{}, errBodySizeUnknown
 	}
 	targets, err := r.selectTargets(bucket, size)
 	if err != nil {

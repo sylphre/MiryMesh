@@ -63,13 +63,11 @@ func main() {
 	}
 	var store s3api.ObjectStore
 	if cfg.Server.Mode == "gateway" {
-		// Gateway: S3 data lives only on DataNodes; controller holds bucket meta only.
-		// DataDir is still used for setup.json/.evac.
-		if cfg.Server.DataDir != "" {
-			_ = os.MkdirAll(cfg.Server.DataDir, 0o750)
-		} else {
+		// Gateway: S3 data lives only on DataNodes; the Master writes no files.
+		// Buckets, nodes, keys and settings are in the database. data_dir is only
+		// read once, to migrate a legacy setup.json; nothing is created there.
+		if cfg.Server.DataDir == "" {
 			cfg.Server.DataDir = "/var/lib/mirymesh"
-			_ = os.MkdirAll(cfg.Server.DataDir, 0o750)
 		}
 		// Temporary: RemoteStore will be created after registry is ready; use local bucket set for now
 		store = &gatewayPlaceholder{dataDir: cfg.Server.DataDir}
@@ -81,13 +79,8 @@ func main() {
 		}
 		store = ls
 	}
-	// Request bodies of unknown size are spooled below the data dir, never in /tmp:
-	// the unit runs with ProtectSystem=strict, so /tmp can be read-only.
-	if cfg.Server.DataDir != "" {
-		if spoolErr := s3api.SetSpoolDir(filepath.Join(cfg.Server.DataDir, "tmp")); spoolErr != nil {
-			slog.Warn("controller: spool dir unavailable, uploads of unknown size may fail", "err", spoolErr)
-		}
-	}
+	// Request bodies are never spooled to disk: RemoteStore streams a body of known
+	// size and refuses one of unknown size with 411 MissingContentLength.
 	// Adoption mode: load snapshot early to restore storage, then restore placement after resolver
 	var adoptedSnapshot *metadata.EvacuationSnapshot
 	// Adoption mode: try to load latest evacuation snapshot from local + datanode remote dirs
@@ -107,7 +100,7 @@ func main() {
 			}
 		}
 	}
-	if snap, loadErr := metadata.LoadAny(localEvac, remoteDirs); loadErr == nil && snap != nil {
+	if snap, loadErr := adoptionSnapshot(cfg, localEvac, remoteDirs); loadErr == nil && snap != nil {
 		slog.Info("controller: evacuation snapshot found, attempting restore", "version", snap.Version, "buckets", len(snap.Buckets))
 		restorer, restorerErr := metadata.NewRestorer(cfg.Server.DataDir)
 		if restorerErr == nil {

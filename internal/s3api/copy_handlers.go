@@ -159,6 +159,9 @@ func (rt *Router) handleCopyObject(w http.ResponseWriter, r *http.Request, destB
 		}
 		copyBody = destEnc.wrap(copyBody)
 	}
+	// The copy has the same size as the source (SSE-C and checksums do not change it).
+	// RemoteStore needs the size to stream the body, because the Master spools nothing to disk.
+	copyBody = withSizeHint(copyBody, srcMeta.Size)
 	m, err4 := rt.store.PutObject(destBucket, destKey, ct, dstMeta, copyBody)
 	if err4 != nil {
 		writeFailure(w, r, err4)

@@ -182,6 +182,13 @@ func main() {
 	}
 	dnHandler.SetPathAdder(addPath)
 
+	// Snapshots pushed by the Master are kept under the data dir, which survives
+	// updates (and container rebuilds when it is a volume). The handler refuses
+	// them when no directory is set, so nothing ever goes to /tmp.
+	if tokenDir != "" {
+		dnHandler.SetEvacDir(filepath.Join(tokenDir, ".evac"))
+	}
+
 	// Persist the controller-issued node token so restarts don't need a new pair token.
 	agent.Bind(filepath.Join(tokenDir, "datanode.token"), dnHandler.SetNodeToken)
 	// Master-triggered self-update: stages a verified release binary under <data dir>/update.

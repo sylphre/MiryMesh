@@ -41,8 +41,7 @@ func readAllObject(t *testing.T, rs *RemoteStore, bucket, key string) []byte {
 	return b
 }
 
-// With a size hint the body is streamed to the DataNode; without one it is
-// spooled to a temporary file. Both must store the object intact.
+// With a size hint the body is streamed to the DataNode and must be stored intact.
 func TestRemoteStorePutObjectStreamsBody(t *testing.T) {
 	c := newMNCluster(t, []string{"n1", "n2"}, 1)
 	rs, _ := c.remote("single", c.master)
@@ -63,18 +62,8 @@ func TestRemoteStorePutObjectStreamsBody(t *testing.T) {
 		t.Errorf("hinted object differs: got %d bytes, want %d", len(got), len(payload))
 	}
 
-	// io.MultiReader hides the length, so this takes the spool path.
-	spooled, err := rs.PutObject("bkt", "spooled.bin", "application/octet-stream", nil,
-		io.MultiReader(bytes.NewReader(payload)))
-	if err != nil {
-		t.Fatalf("PutObject without size hint: %v", err)
-	}
-	if spooled.Size != int64(len(payload)) {
-		t.Errorf("spooled Size = %d, want %d", spooled.Size, len(payload))
-	}
-	if got := readAllObject(t, rs, "bkt", "spooled.bin"); !bytes.Equal(got, payload) {
-		t.Errorf("spooled object differs: got %d bytes, want %d", len(got), len(payload))
-	}
+	// A body of unknown size is refused, not spooled:
+	// see TestRemoteStorePutObjectRefusesUnknownSize.
 }
 
 func TestRemoteStorePutObjectEmptyBody(t *testing.T) {

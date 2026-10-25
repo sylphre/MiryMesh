@@ -4,60 +4,52 @@
 package s3api
 
 import (
-	"os"
-	"path/filepath"
+	"bytes"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 )
 
-func TestSpoolBodyUsesConfiguredDir(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "spool")
-	if err := SetSpoolDir(dir); err != nil {
-		t.Fatal(err)
+// The Master keeps no files, so a body of unknown size is refused with 411
+// instead of being spooled to a temporary file.
+func TestRemoteStorePutObjectRefusesUnknownSize(t *testing.T) {
+	c := newMNCluster(t, []string{"n1"}, 1)
+	rs, _ := c.remote("single", c.master)
+	if err := rs.CreateBucket("bkt"); err != nil {
+		t.Fatalf("CreateBucket: %v", err)
 	}
-	t.Cleanup(func() { _ = SetSpoolDir("") })
-
-	f, n, cleanup, err := spoolBody(strings.NewReader("hello"))
-	if err != nil {
-		t.Fatal(err)
+	// io.MultiReader hides the length.
+	_, err := rs.PutObject("bkt", "unknown", "application/octet-stream", nil,
+		io.MultiReader(strings.NewReader("hello")))
+	var apiErr APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want an APIError", err)
 	}
-	if got := filepath.Dir(f.Name()); got != dir {
-		t.Fatalf("spool file in %q, want %q", got, dir)
+	if apiErr.Status != http.StatusLengthRequired || apiErr.Code != "MissingContentLength" {
+		t.Fatalf("got %d %s, want 411 MissingContentLength", apiErr.Status, apiErr.Code)
 	}
-	if n != 5 {
-		t.Fatalf("size = %d, want 5", n)
-	}
-	cleanup()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("spool dir not empty after cleanup: %d entries", len(entries))
+	if _, _, getErr := rs.GetObject("bkt", "unknown"); getErr == nil {
+		t.Error("object was stored although the size was unknown")
 	}
 }
 
-func TestSetSpoolDirRemovesLeftovers(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "spool")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
+func TestBodySizeHint(t *testing.T) {
+	cases := []struct {
+		name string
+		r    io.Reader
+		want int64
+	}{
+		{"hinted", withSizeHint(strings.NewReader("abc"), 42), 42},
+		{"bytes.Reader", bytes.NewReader([]byte("abcd")), 4},
+		{"strings.Reader", strings.NewReader("ab"), 2},
+		{"empty bytes.Reader", bytes.NewReader(nil), 0},
+		{"hidden length", io.MultiReader(strings.NewReader("abc")), -1},
 	}
-	stale := filepath.Join(dir, spoolPrefix+"stale")
-	other := filepath.Join(dir, "keep.txt")
-	for _, p := range []string{stale, other} {
-		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
+	for _, tc := range cases {
+		if got := bodySizeHint(tc.r); got != tc.want {
+			t.Errorf("%s: bodySizeHint = %d, want %d", tc.name, got, tc.want)
 		}
-	}
-	if err := SetSpoolDir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = SetSpoolDir("") })
-
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Fatalf("stale spool file still present: %v", err)
-	}
-	if _, err := os.Stat(other); err != nil {
-		t.Fatalf("unrelated file was removed: %v", err)
 	}
 }

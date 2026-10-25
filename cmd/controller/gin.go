@@ -190,9 +190,13 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, cfg conf
 }
 
 // controllerEvacDir returns the evacuation directory: MIRYMESH_EVAC_DIR, or
-// <data_dir>/.evac (the same place main.go reads at startup). It is never /tmp.
-// Empty means no data_dir is configured.
+// <data_dir>/.evac. It is never /tmp. Empty means the controller keeps no
+// snapshots: that is always the case in gateway mode, where the Master stores
+// no files and /internal/evacuate and /internal/restore are refused.
 func controllerEvacDir(cfg config.Config) string {
+	if cfg.Server.Mode == "gateway" {
+		return ""
+	}
 	if d := os.Getenv("MIRYMESH_EVAC_DIR"); d != "" {
 		return d
 	}

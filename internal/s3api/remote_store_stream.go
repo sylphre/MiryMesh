@@ -6,9 +6,6 @@ package s3api
 import (
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -69,75 +66,27 @@ func WithSizeHint(r io.Reader, size int64) io.Reader {
 	return withSizeHint(r, size)
 }
 
-// bodySizeHint returns the size set by withSizeHint, or -1 when unknown.
+// bodySizeHint returns the size set by withSizeHint, or -1 when unknown. Readers
+// that report what is left (bytes.Reader, strings.Reader, bytes.Buffer) count as
+// known.
 func bodySizeHint(r io.Reader) int64 {
 	if h, ok := r.(sizeHinted); ok {
 		return h.SizeHint()
 	}
+	if l, ok := r.(interface{ Len() int }); ok {
+		return int64(l.Len())
+	}
 	return -1
 }
 
-// spoolPrefix is the file name prefix of spooled request bodies.
-const spoolPrefix = "mirymesh-put-"
-
-var (
-	spoolMu  sync.RWMutex
-	spoolDir string
-)
-
-// SetSpoolDir sets the directory where request bodies of unknown size are
-// spooled. The controller points it below its data directory, because the
-// systemd unit runs with ProtectSystem=strict and /tmp may be read-only. The
-// directory is created (0700) and spool files left by a crashed run are
-// removed. An empty dir restores the default (os.TempDir), which is only meant
-// for tests and library use.
-func SetSpoolDir(dir string) error {
-	if dir != "" {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
-		}
-		if entries, err := os.ReadDir(dir); err == nil {
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasPrefix(e.Name(), spoolPrefix) {
-					_ = os.Remove(filepath.Join(dir, e.Name()))
-				}
-			}
-		}
-	}
-	spoolMu.Lock()
-	spoolDir = dir
-	spoolMu.Unlock()
-	return nil
-}
-
-func currentSpoolDir() string {
-	spoolMu.RLock()
-	defer spoolMu.RUnlock()
-	return spoolDir
-}
-
-// spoolBody copies r into a temporary file and returns it, rewound, with its
-// size. cleanup closes and removes the file. Used when the size is unknown, so
-// the body goes to disk instead of memory. The file is created in the directory
-// set by SetSpoolDir.
-func spoolBody(r io.Reader) (*os.File, int64, func(), error) {
-	f, err := os.CreateTemp(currentSpoolDir(), spoolPrefix+"*")
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	cleanup := func() {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-	}
-	size, err := io.Copy(f, r)
-	if err == nil {
-		_, err = f.Seek(0, io.SeekStart)
-	}
-	if err != nil {
-		cleanup()
-		return nil, 0, nil, err
-	}
-	return f, size, cleanup, nil
+// errBodySizeUnknown is returned for a body whose size is not known. The Master
+// keeps no files, so it cannot spool such a body to learn its size. S3 clients
+// send Content-Length (or x-amz-decoded-content-length for aws-chunked) on
+// PutObject.
+var errBodySizeUnknown = APIError{
+	Code:    "MissingContentLength",
+	Message: "You must provide the Content-Length HTTP header.",
+	Status:  http.StatusLengthRequired,
 }
 
 // readErrTracker remembers the first read error of the source other than

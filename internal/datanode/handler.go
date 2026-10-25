@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -65,7 +64,7 @@ func NewHandlerWithEvacDir(reg *Registry, token, evacDir string) *Handler {
 
 // SetEvacDir sets the directory used by /internal/evacuate and /internal/restore.
 // Call it before the handler serves requests. Without it the handlers fall back
-// to os.TempDir(), which is read-only under ProtectSystem=strict.
+// to a 503 answer: nothing is written outside the configured directory.
 func (h *Handler) SetEvacDir(dir string) {
 	h.evacDir = dir
 }
@@ -254,9 +253,12 @@ func (h *Handler) handleEvacuate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid token", http.StatusForbidden)
 		return
 	}
+	// No directory means this process keeps no snapshots (a gateway Master).
+	// Never fall back to /tmp.
 	dir := h.evacDir
 	if dir == "" {
-		dir = os.TempDir()
+		http.Error(w, "snapshots are not kept on this node", http.StatusServiceUnavailable)
+		return
 	}
 	ev, err := metadata.NewEvacuator(dir)
 	if err != nil {
@@ -298,7 +300,8 @@ func (h *Handler) handleRestore(w http.ResponseWriter, r *http.Request) {
 	// to include placement policies and access keys so GUI restore is complete.
 	dir := h.evacDir
 	if dir == "" {
-		dir = os.TempDir()
+		http.Error(w, "snapshots are not kept on this node", http.StatusServiceUnavailable)
+		return
 	}
 	snap, err := metadata.LoadAny(dir, nil)
 	if err != nil {
