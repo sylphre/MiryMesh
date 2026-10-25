@@ -70,9 +70,9 @@ func TestRemoteStoreMultipartRoundTrip(t *testing.T) {
 	for i, size := range sizes {
 		data := mpTestBytes(int64(i+1), size)
 		all = append(all, data...)
-		rec, err := rs.UploadPart(st.UploadID, i+1, bytes.NewReader(data))
-		if err != nil {
-			t.Fatalf("UploadPart %d: %v", i+1, err)
+		rec, upErr := rs.UploadPart(st.UploadID, i+1, bytes.NewReader(data))
+		if upErr != nil {
+			t.Fatalf("UploadPart %d: %v", i+1, upErr)
 		}
 		if rec.PartNumber != i+1 || rec.Size != int64(size) || rec.ETag == "" {
 			t.Fatalf("part %d record: %+v", i+1, rec)
@@ -149,16 +149,16 @@ func TestRemoteStoreMultipartFoundByAnotherMaster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := first.UploadPart(st.UploadID, 1, bytes.NewReader(mpTestBytes(1, 2048))); err != nil {
+	if _, err = first.UploadPart(st.UploadID, 1, bytes.NewReader(mpTestBytes(1, 2048))); err != nil {
 		t.Fatal(err)
 	}
 
 	// A second RemoteStore has no memory of the upload, like a restarted Master.
 	second, _ := c.remote("single", c.master)
-	if err := second.CreateBucket("mpbucket"); err != nil {
+	if err = second.CreateBucket("mpbucket"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := second.UploadPart(st.UploadID, 2, bytes.NewReader(mpTestBytes(2, 512))); err != nil {
+	if _, err = second.UploadPart(st.UploadID, 2, bytes.NewReader(mpTestBytes(2, 512))); err != nil {
 		t.Fatalf("UploadPart through a store that does not know the upload: %v", err)
 	}
 	parts, err := second.ListParts(st.UploadID)
@@ -166,7 +166,7 @@ func TestRemoteStoreMultipartFoundByAnotherMaster(t *testing.T) {
 		t.Fatalf("ListParts = %+v, %v; want 2 parts", parts, err)
 	}
 
-	if err := second.AbortMultipartUpload(st.UploadID); err != nil {
+	if err = second.AbortMultipartUpload(st.UploadID); err != nil {
 		t.Fatalf("AbortMultipartUpload: %v", err)
 	}
 	if up := first.GetUpload(st.UploadID); up != nil {
