@@ -21,16 +21,16 @@ func TestDataNodeStoreAddDisk(t *testing.T) {
 	}
 	ds := NewDataNodeStoreWithDisks(s1, map[string]ObjectStore{d1: s1})
 
-	if _, err := ds.Disk(d2, bucket); err == nil {
+	if _, err = ds.Disk(d2, bucket); err == nil {
 		t.Fatal("a disk that was not added must be rejected")
 	}
-	if err := ds.AddDisk(d2, s2); err != nil {
+	if err = ds.AddDisk(d2, s2); err != nil {
 		t.Fatal(err)
 	}
-	if err := ds.AddDisk(d2, s2); err != nil {
+	if err = ds.AddDisk(d2, s2); err != nil {
 		t.Fatalf("adding the same disk twice must be a no-op: %v", err)
 	}
-	if err := ds.AddDisk(d2, nil); err == nil {
+	if err = ds.AddDisk(d2, nil); err == nil {
 		t.Fatal("nil store must be rejected")
 	}
 
@@ -38,7 +38,7 @@ func TestDataNodeStoreAddDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := api.PutObject(bucket, "k", "text/plain", map[string]string{}, strings.NewReader("hi")); err != nil {
+	if _, err = api.PutObject(bucket, "k", "text/plain", map[string]string{}, strings.NewReader("hi")); err != nil {
 		t.Fatal(err)
 	}
 	// A request without ?disk= must now find the object on the added disk.
@@ -47,7 +47,7 @@ func TestDataNodeStoreAddDisk(t *testing.T) {
 		t.Fatalf("object on the added disk not found: %v", err)
 	}
 	_ = rc.Close()
-	if err := ds.DeleteObject(bucket, "k"); err != nil {
+	if err = ds.DeleteObject(bucket, "k"); err != nil {
 		t.Fatalf("delete on the added disk: %v", err)
 	}
 }
