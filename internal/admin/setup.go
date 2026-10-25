@@ -191,6 +191,10 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 					DBDSN         string `json:"db_dsn"`
 				}
 				_ = json.NewDecoder(r.Body).Decode(&req2)
+				req2.Region = strings.TrimSpace(req2.Region)
+				if !validSetupRegion(w, req2.Region) {
+					return
+				}
 				cur := h.setupStore.Get()
 				if cur != nil {
 					// Gateway or ephemeral (in-memory) with 0 nodes: allow empty S3 keys and skip policy validation
@@ -240,6 +244,12 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 				}
+				if cur != nil {
+					if err := h.applySetupRegion(req2.Region); err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+				}
 				if h.authStore != nil && cur != nil && cur.AccessKey != "" {
 					_ = h.authStore.Add(cur.AccessKey, cur.SecretKey)
 				}
@@ -282,6 +292,10 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		}
 		// Gateway + no datanode: S3 keys may be empty — allow empty, but if gateway and no nodes, S3 creation will be 503.
 		// Non-gateway with no datanode and no S3 keys: allow empty as well (keys created later via generate-credentials).
+		req.Region = strings.TrimSpace(req.Region)
+		if !validSetupRegion(w, req.Region) {
+			return
+		}
 		policy := req.DefaultPolicy
 		if policy == "" {
 			policy = "single"
@@ -317,6 +331,7 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		if h.authStore != nil && st.AccessKey != "" {
 			_ = h.authStore.Add(st.AccessKey, st.SecretKey)
 		}
+		h.applySetupRegionBestEffort(st.Region)
 		// Create session for the new admin token
 		if sdb, ok := h.setupStore.(*SetupStoreDB); ok {
 			_ = sdb.CreateSession(token, st.AdminUsername, 24*60*60*1e9)

@@ -184,7 +184,7 @@ async function saveConfig() {
     if (text.includes('requires') && text.includes('nodes')) {
       await api('/api/admin/setup', {
         method: 'POST',
-        body: { default_policy: defaultPolicy.value, gateway: gateway.value },
+        body: { default_policy: defaultPolicy.value, gateway: gateway.value, region: region.value },
       })
     } else {
       throw e

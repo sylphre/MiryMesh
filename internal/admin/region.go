@@ -48,6 +48,47 @@ func (h *Handler) LoadRegionSetting() {
 	slog.Info("region: restored saved region", "region", v)
 }
 
+// validSetupRegion checks the region sent by the Setup page. An empty value is
+// accepted and means "leave the region as it is". Any other invalid value is
+// answered with 400 and false is returned.
+func validSetupRegion(w http.ResponseWriter, region string) bool {
+	if region == "" || s3api.ValidRegion(region) {
+		return true
+	}
+	http.Error(w, "リージョンは英小文字・数字・ハイフンのみ、64 文字以内で指定してください (例: us-east-1, ap-northeast-1)", http.StatusBadRequest)
+	return false
+}
+
+// applySetupRegion makes the region chosen on the Setup page the one the S3 API
+// reports. The Setup page stores its value in setup.region, which the router never
+// reads, so it is also set on the live router and saved under app_settings
+// "s3.region" (the key LoadRegionSetting reads at startup). An empty region changes
+// nothing. If the database write fails, the router goes back to its previous region.
+func (h *Handler) applySetupRegion(region string) error {
+	if region == "" || h.region == nil {
+		return nil
+	}
+	prev := h.region.Region()
+	if err := h.region.SetRegion(region); err != nil {
+		return err
+	}
+	if ss, ok := h.setupStore.(settingsStore); ok {
+		if err := ss.SetSetting(settingRegion, region); err != nil {
+			_ = h.region.SetRegion(prev)
+			return err
+		}
+	}
+	return nil
+}
+
+// applySetupRegionBestEffort is applySetupRegion for the first setup, where the
+// admin account is already saved and cannot be rolled back: a failure is logged.
+func (h *Handler) applySetupRegionBestEffort(region string) {
+	if err := h.applySetupRegion(region); err != nil {
+		slog.Warn("region: could not apply the region chosen on the Setup page", "region", region, "err", err)
+	}
+}
+
 type regionDoc struct {
 	Region    string `json:"region"`
 	Default   string `json:"default"`
