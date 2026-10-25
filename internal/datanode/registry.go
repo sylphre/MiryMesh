@@ -70,6 +70,7 @@ type Registry struct {
 	disks     map[string]map[string]*DiskPath // nodeID -> path -> DiskPath
 	heartbeat time.Duration
 	timeout   time.Duration
+	tokenSrc  func(nodeID string) (string, bool) // per-node token lookup (Master side, optional)
 }
 
 // NewRegistry creates a registry. Heartbeat interval and offline timeout are

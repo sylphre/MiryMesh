@@ -68,8 +68,10 @@ func (h *Handler) SetPairConsumer(fn func(token string) error) { h.pairConsume =
 // /internal/adopt answers 404.
 func (h *Handler) SetAdopter(fn func(controllerURL, pairToken string) error) { h.adopter = fn }
 
-// tokenOK reports whether tok authenticates nodeID: either the shared internal
-// token or the node token derived from it. An empty handler token means "open".
+// tokenOK reports whether tok authenticates nodeID: the shared internal token, the
+// node's random token from the store, or (only for a node that has no stored token
+// yet) the legacy token derived from the internal token. An empty handler token
+// means "open".
 func (h *Handler) tokenOK(nodeID, tok string) bool {
 	if h.token == "" {
 		return true
@@ -80,7 +82,12 @@ func (h *Handler) tokenOK(nodeID, tok string) bool {
 	if nodeID == "" || tok == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(tok), []byte(NodeToken(h.token, nodeID))) == 1
+	if h.tokens != nil {
+		if cur, ok := h.tokens.GetNodeToken(nodeID); ok {
+			return subtle.ConstantTimeCompare([]byte(tok), []byte(cur)) == 1
+		}
+	}
+	return h.legacyNodeTokenOK(nodeID, tok)
 }
 
 type adoptReq struct {

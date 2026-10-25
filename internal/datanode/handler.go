@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -45,6 +46,8 @@ type Handler struct {
 	nodeTok tokenBox
 	// updater serves /internal/update (DataNode side, optional).
 	updater *Updater
+	// tokens holds the random per-node tokens (Master side, optional).
+	tokens NodeTokenStore
 }
 
 // NewHandler creates a Handler.
@@ -95,7 +98,9 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	authed := h.tokenOK(req.NodeID, req.Token)
+	// The legacy derived token is accepted here (and only here) so a node paired by an
+	// older Master can register once and receive its random token.
+	authed := h.tokenOK(req.NodeID, req.Token) || h.legacyNodeTokenOK(req.NodeID, req.Token)
 	viaPair := !authed && h.pairConsume != nil && req.Token != ""
 	if !authed && !viaPair {
 		http.Error(w, "invalid token", http.StatusForbidden)
@@ -118,9 +123,15 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	h.registry.SetNodeVersion(req.NodeID, req.Version)
 	resp := map[string]string{"status": "ok"}
-	if h.token != "" {
+	if h.token != "" || h.tokens != nil {
 		// Per-node credential for later heartbeat/disk calls and re-registration.
-		resp["node_token"] = NodeToken(h.token, req.NodeID)
+		nodeTok, err := h.issueNodeToken(req.NodeID, req.Token, viaPair)
+		if err != nil {
+			slog.Error("datanode: could not issue a node token", "node", req.NodeID, "err", err)
+			http.Error(w, "could not issue node token", http.StatusInternalServerError)
+			return
+		}
+		resp["node_token"] = nodeTok
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)

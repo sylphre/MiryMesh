@@ -119,7 +119,7 @@ func (h *Handler) HandleNodeUpdate(w http.ResponseWriter, r *http.Request) {
 	case !online:
 		http.Error(w, "ノードがオフラインです。起動してから更新してください", http.StatusConflict)
 		return
-	case h.adminToken == "":
+	case h.registry.NodeCredential(req.NodeID, h.adminToken) == "":
 		http.Error(w, "internal token is not configured on the Master", http.StatusConflict)
 		return
 	}
@@ -135,7 +135,7 @@ func (h *Handler) HandleNodeUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nreq.Header.Set("Content-Type", "application/json")
-	nreq.Header.Set("X-Internal-Token", datanode.NodeToken(h.adminToken, req.NodeID))
+	nreq.Header.Set("X-Internal-Token", h.registry.NodeCredential(req.NodeID, h.adminToken))
 	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(nreq)
 	if err != nil {
 		http.Error(w, "ノードに接続できません: "+err.Error(), http.StatusBadGateway)

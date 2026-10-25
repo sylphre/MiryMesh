@@ -65,11 +65,15 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 - リリースに該当ファイルが無いときは、ソースビルドに自動で切り替わります（git と Go が必要）。`prerelease` / `release` ブランチへの merge で release ワークフローが走るまでは、この経路になります。
 - `mirymesh` ユーザー、`/etc/mirymesh/config.yaml`、systemd ユニットを作ります。
 - `--path` のディレクトリを `mirymesh` の所有にして、サービスから書き込めるようにします。ユニットは `ProtectSystem=strict` なので、指定しないと書けません。
-- ワンタイムトークンで Master に登録し、成功したらトークンをこのサーバーから消します。以降の再起動には保存済みのノードトークンが使われます。
+- ワンタイムトークンで Master に登録します。Master はこのノード専用のランダムなノードトークンを発行し、DataNode は `/var/lib/mirymesh/datanode.token` に保存します。成功するとワンタイムトークンはこのサーバーから消え、以降の再起動と Master との通信にはノードトークンが使われます。
+- ノードトークンは Master のデータベースに `MIRYMESH_MASTER_KEY` で暗号化して保存されます。Admin Token（内部トークン）とは無関係なので、Admin Token を変えてもペアリングは外れません。DataNode 側にデータベースは要りません。
 
 注意点:
 
 - `pair-token` は 15 分で失効し、1 回しか使えません。
+- 以前の Master でペアリングしたノードは、DataNode を再起動したときの登録で自動的にランダムなノードトークンへ移行します。Master を更新しただけでは移行せず、それまでは従来のトークンで動き続けます。再ペアリングは不要です。
+- Admin Token を変更する予定がある場合は、先に全ノードを一度再起動して移行を済ませてください。移行前のノードは従来のトークン（Admin Token から派生したもの）を使っているため、Admin Token を変えると外れます。
+- Master のデータベースを失うなどしてノードトークンが読めなくなった場合は、そのノードを新しい `pair-token` で再ペアリングしてください。`MIRYMESH_MASTER_KEY` を入れ替えるときは、先に旧キーを old keys に残して `RotateMasterKey` を実行すると、ノードトークンも新しいキーで再暗号化されます。
 - Node ID はホスト名です。Master が `<ホスト名>:9002` でこのノードに届く必要があります（Tailscale MagicDNS、DNS、`/etc/hosts` など）。
 - ディスクを増やすときは、`--pair-token` を外し、使うディスクの `--path` を全部並べて再実行します（例: `--client --master-url http://<master>:9001 --path /mnt/disk1 --path /mnt/disk2`）。保存先の一覧は置き換わり、サービスは再起動されます。`--path` を省略すると `/var/lib/mirymesh/data` を使います。
 - 状態確認: `systemctl status mirymesh-datanode` / `journalctl -u mirymesh-datanode -f`

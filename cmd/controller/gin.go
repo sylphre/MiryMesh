@@ -89,6 +89,8 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, cfg conf
 	// UI-issued one-time pair tokens are accepted by /internal/register.
 	if sdb, ok := setupStore.(*admin.SetupStoreDB); ok && sdb != nil {
 		dnHandler.SetPairConsumer(sdb.ConsumePairToken)
+		// Random per-node tokens live in the database, not derived from the admin token.
+		dnHandler.SetNodeTokenStore(sdb)
 	}
 	r.POST("/internal/register", ginWrap(dnHandler.HandleRegister))
 	r.POST("/internal/heartbeat", ginWrap(dnHandler.HandleHeartbeat))
@@ -196,6 +198,7 @@ func newS3Engine(router *s3api.Router, authStore *auth.Store, userMgr *users.Man
 	// UI-issued one-time pair tokens are accepted on this port as well.
 	if sdb, ok := setupStore.(*admin.SetupStoreDB); ok && sdb != nil {
 		dnHandler.SetPairConsumer(sdb.ConsumePairToken)
+		dnHandler.SetNodeTokenStore(sdb)
 	}
 	r.POST("/internal/register", ginWrap(dnHandler.HandleRegister))
 	r.POST("/internal/heartbeat", ginWrap(dnHandler.HandleHeartbeat))
