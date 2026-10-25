@@ -14,7 +14,9 @@ import (
 //
 //	-ldflags "-X github.com/sylphre/MiryMesh/internal/version.Version=v1.0.0-rc.1"
 //
-// Local builds keep "dev".
+// Builds made by install.sh from source use "<7-char commit>-dev" (for example "1f7b438-dev"),
+// or the pinned tag when --version is given. A plain "go build" keeps "dev". Neither form is a
+// semantic version, so Valid, ValidTag and IsPrerelease report false and Compare reports ok=false.
 var Version = "dev"
 
 type semver struct {

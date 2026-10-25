@@ -64,6 +64,7 @@ CHANNEL="${MIRYMESH_CHANNEL:-}"   # release | prerelease. Empty = decided below
 CHANNEL_FILE=/etc/mirymesh/channel
 ROLE_FILE=/etc/mirymesh/role      # "master" or "client", written by every successful install/update
 FORCE_ROLE=""
+ALLOW_DOWNGRADE=""
 CHECK_ROLE=""                     # --check-role: report the role of this host and stop, changing nothing
 VR_TOKEN_BEFORE="no"              # was datanode.token present before this run? (see verify_role)
 # "--opt VALUE" と "--opt=VALUE" の両方を受け付ける。前者を後者に書き換えて、後段の case で扱う。
@@ -99,6 +100,7 @@ for arg in "$@"; do
     --dev) MODE="from-source" ;;
     --no-enable) NO_ENABLE=1 ;;
     --force-role) FORCE_ROLE=1 ;;
+    --allow-downgrade) ALLOW_DOWNGRADE=1 ;;
     --check-role) CHECK_ROLE=1; ASSUME_YES=1 ;;
     --skip-db-check) SKIP_DB_CHECK=1 ;;
     --db-driver=*|--db-user=*|--db-name=*|--db-password=*) ;; # read again in the Master DB step
@@ -126,6 +128,7 @@ for arg in "$@"; do
       echo "  --update   Update an existing install in place (role and config are kept; --version TAG pins the release)"
       echo "  --yes, -y  Never prompt, use defaults (for scripts)"
       echo "  --force-role  Allow a role that differs from the one recorded in /etc/mirymesh/role (dangerous)"
+      echo "  --allow-downgrade  Let --update install an older build than the one on this host (refused by default)"
       echo "  --check-role  Only report the role of this host (and verify it); change nothing. Add --master/--client to test a role"
       echo "  --no-self-update  DataNode: do not enable one-click update from the Master"
       echo "  No args    Interactive selection (Master / Client). If MiryMesh is already installed: Update only"
@@ -237,6 +240,82 @@ detect_installed_channel() {
     echo "prerelease"
   fi
   return 0
+}
+
+# --- Downgrade guard -------------------------------------------------------------------------
+# An update must not put an older build on a host: the database schema and the node token store
+# of a newer build no longer match an older binary. Two checks run before anything is installed:
+#   1. version: the release / tag to install must not be older than the installed version;
+#   2. source builds: the commit installed last time (COMMIT_FILE) must be part of the history of
+#      the commit to install. A source build reports the version "dev", so only this catches it.
+# --allow-downgrade skips both. Both only run with --update.
+COMMIT_FILE=/etc/mirymesh/installed_commit
+DOWNGRADE_MSG=""
+
+# Succeeds when the argument looks like MAJOR.MINOR.PATCH[-pre] (with or without a leading v).
+is_semver() {
+  case "${1#v}" in
+    [0-9]*.[0-9]*.[0-9]*) return 0 ;;
+  esac
+  return 1
+}
+
+# semver_lt A B: succeeds when version A is older than version B (a pre-release is older than its release).
+semver_lt() {
+  _sl_a="${1#v}"; _sl_a="${_sl_a%%+*}"
+  _sl_b="${2#v}"; _sl_b="${_sl_b%%+*}"
+  _sl_ac="${_sl_a%%-*}"; _sl_bc="${_sl_b%%-*}"
+  _sl_ap=""; _sl_bp=""
+  case "$_sl_a" in *-*) _sl_ap="${_sl_a#*-}" ;; esac
+  case "$_sl_b" in *-*) _sl_bp="${_sl_b#*-}" ;; esac
+  if [ "$_sl_ac" != "$_sl_bc" ]; then
+    if [ "$(printf '%s\n%s\n' "$_sl_ac" "$_sl_bc" | sort -V | head -1)" = "$_sl_ac" ]; then return 0; fi
+    return 1
+  fi
+  if [ "$_sl_ap" = "$_sl_bp" ]; then return 1; fi
+  if [ -z "$_sl_ap" ]; then return 1; fi
+  if [ -z "$_sl_bp" ]; then return 0; fi
+  if [ "$(printf '%s\n%s\n' "$_sl_ap" "$_sl_bp" | sort -V | head -1)" = "$_sl_ap" ]; then return 0; fi
+  return 1
+}
+
+# refuse_version_downgrade NEW_VERSION: returns 1 and sets DOWNGRADE_MSG when NEW_VERSION is older
+# than the installed one. Versions that are not MAJOR.MINOR.PATCH (for example "dev") are not compared.
+refuse_version_downgrade() {
+  [ -n "$UPDATE" ] || return 0
+  [ -z "$ALLOW_DOWNGRADE" ] || return 0
+  _rv_new="$1"
+  _rv_old="$(installed_version)"
+  is_semver "$_rv_old" || return 0
+  is_semver "$_rv_new" || return 0
+  if semver_lt "$_rv_new" "$_rv_old"; then
+    DOWNGRADE_MSG="downgrade refused: $_rv_old is installed and this update would install $_rv_new. Nothing was changed. Downgrades are not supported (rebuild the host instead); --allow-downgrade overrides this."
+    return 1
+  fi
+  return 0
+}
+
+# refuse_source_downgrade SRC_DIR: returns 1 and sets DOWNGRADE_MSG when the commit built last time
+# is not contained in the history of SRC_DIR's HEAD. Skipped when no commit was recorded, git is
+# missing, or the checkout is shallow (the history needed for the check is not there).
+refuse_source_downgrade() {
+  [ -n "$UPDATE" ] || return 0
+  [ -z "$ALLOW_DOWNGRADE" ] || return 0
+  [ -f "$COMMIT_FILE" ] || return 0
+  _rs_old="$(head -1 "$COMMIT_FILE" 2>/dev/null || true)"
+  case "$_rs_old" in ''|*[!0-9a-f]*) return 0 ;; esac
+  command -v git >/dev/null 2>&1 || return 0
+  git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  [ "$(git -C "$1" rev-parse --is-shallow-repository 2>/dev/null || true)" != "true" ] || return 0
+  _rs_new="$(git -C "$1" rev-parse HEAD 2>/dev/null || true)"
+  [ -n "$_rs_new" ] || return 0
+  [ "$_rs_old" != "$_rs_new" ] || return 0
+  if git -C "$1" cat-file -e "${_rs_old}^{commit}" 2>/dev/null \
+     && git -C "$1" merge-base --is-ancestor "$_rs_old" "$_rs_new" 2>/dev/null; then
+    return 0
+  fi
+  DOWNGRADE_MSG="downgrade refused: the installed build ($(printf '%.7s' "$_rs_old")) is not part of the history of what this update would install ($(printf '%.7s' "$_rs_new")). The target is older or on another line of history, so it may lack changes this host already runs. Nothing was changed. Downgrades are not supported (rebuild the host instead); --allow-downgrade overrides this."
+  return 1
 }
 
 # Interactive run on a host that already has MiryMesh: offer Update only.
@@ -509,7 +588,12 @@ install_release() {
     rm -rf "$_tmp"
     die "checksum verification failed for $_name — refusing to install"
   fi
+  # The binary is static: ask it for its version before it replaces the installed one.
+  _new_v="$("$_tmp/$_name" --version 2>/dev/null | head -1 || true)"
+  refuse_version_downgrade "$_new_v" || { rm -rf "$_tmp"; die "$DOWNGRADE_MSG"; }
   install -m 0755 "$_tmp/$_name" /usr/local/bin/mirymesh-datanode || { rm -rf "$_tmp"; return 1; }
+  # A release binary has no source commit; drop the record of an earlier source build.
+  rm -f "$COMMIT_FILE"
   rm -rf "$_tmp"
   log "Installed /usr/local/bin/mirymesh-datanode (sha256 verified, version: $(/usr/local/bin/mirymesh-datanode --version 2>/dev/null || echo unknown))"
 }
@@ -544,10 +628,15 @@ else
   [ "$CHANNEL" != "prerelease" ] || _def_branch="prerelease"
   _ref="${VERSION:-${BRANCH:-$_def_branch}}"
   log "Cloning MiryMesh ($_ref) to $SRC"
-  git clone --depth 1 --branch "$_ref" https://github.com/sylphre/MiryMesh "$SRC" \
+  # Full history (no --depth 1): the downgrade check needs it.
+  git clone --branch "$_ref" https://github.com/sylphre/MiryMesh "$SRC" \
     || die "could not clone '$_ref' from GitHub — check the branch/tag name (--branch NAME / --version TAG)"
 fi
 log "Source: $SRC"
+if [ "$MODE" != "release" ]; then
+  refuse_version_downgrade "$VERSION" || die "$DOWNGRADE_MSG"
+  if [ -n "$SRC" ]; then refuse_source_downgrade "$SRC" || die "$DOWNGRADE_MSG"; fi
+fi
 
 # Ensure mirymesh user/group (idempotent)
 if ! getent group mirymesh >/dev/null 2>&1; then
@@ -595,8 +684,20 @@ install_from_source() {
   # Silence only that warning; everything else still shows.
   CGO_CFLAGS="${CGO_CFLAGS:-} -Wno-discarded-qualifiers"
   export CGO_CFLAGS
+  # Version stamped into the binaries (Master and DataNode alike): the pinned tag from --version,
+  # otherwise "<7-char commit>-dev" (for example 1f7b438-dev), so a source build says what it is built from.
+  # It is not a semantic version, so the update check and the downgrade guard treat it like "dev".
+  _bv="$VERSION"
+  if [ -z "$_bv" ]; then
+    _bh="$(git -C "$SRC" rev-parse --short=7 HEAD 2>/dev/null || true)"
+    case "$_bh" in
+      ''|*[!0-9a-f]*) ;;
+      *) _bv="${_bh}-dev" ;;
+    esac
+  fi
+  log "Build version: ${_bv:-dev}"
   _ldf=""
-  [ -z "$VERSION" ] || _ldf="-X github.com/sylphre/MiryMesh/internal/version.Version=$VERSION"
+  [ -z "$_bv" ] || _ldf="-X github.com/sylphre/MiryMesh/internal/version.Version=$_bv"
   # A DataNode host gets no controller: its mere presence made later runs detect the host as a Master.
   if [ "$ROLE" != "client" ]; then
     (cd "$SRC" && go build -trimpath -ldflags="$_ldf" -o /tmp/mirymesh-controller ./cmd/controller)
@@ -608,6 +709,13 @@ install_from_source() {
   fi
   install -m 0755 /tmp/mirymesh-datanode   /usr/local/bin/mirymesh-datanode
   install -m 0755 /tmp/mirymesh            /usr/local/bin/mirymesh
+  # Remember which commit this build came from, so a later --update can refuse to go back in history.
+  mkdir -p /etc/mirymesh
+  if _ic="$(git -C "$SRC" rev-parse HEAD 2>/dev/null)" && [ -n "$_ic" ]; then
+    printf '%s\n' "$_ic" > "$COMMIT_FILE" 2>/dev/null || true
+  else
+    rm -f "$COMMIT_FILE"
+  fi
   # The console is embedded in the controller binary. Drop the copy an older install left behind.
   rm -rf /usr/share/mirymesh/static
   rmdir /usr/share/mirymesh 2>/dev/null || true
