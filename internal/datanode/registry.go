@@ -71,6 +71,7 @@ type Registry struct {
 	heartbeat time.Duration
 	timeout   time.Duration
 	tokenSrc  func(nodeID string) (string, bool) // per-node token lookup (Master side, optional)
+	store     NodeStore
 }
 
 // NewRegistry creates a registry. Heartbeat interval and offline timeout are
@@ -96,7 +97,6 @@ func (r *Registry) RegisterNode(id, addr string) error {
 		return errors.New("node id and addr must not be empty")
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	n, ok := r.nodes[id]
 	if !ok {
 		n = &Node{ID: id}
@@ -105,6 +105,9 @@ func (r *Registry) RegisterNode(id, addr string) error {
 	n.Addr = addr
 	n.Status = StatusOnline
 	n.LastSeen = time.Now()
+	snap := *n
+	r.mu.Unlock()
+	r.persistNode(snap)
 	return nil
 }
 
@@ -132,9 +135,15 @@ func (r *Registry) SetNodeVersion(id, ver string) {
 		ver = ver[:64]
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if n, ok := r.nodes[id]; ok {
+	n, ok := r.nodes[id]
+	var snap Node
+	if ok {
 		n.Version = ver
+		snap = *n
+	}
+	r.mu.Unlock()
+	if ok {
+		r.persistNode(snap)
 	}
 }
 
@@ -167,8 +176,8 @@ func (r *Registry) UpsertDisk(nodeID, path string, capacity, used, limit int64) 
 		return errors.New("limit must not exceed capacity")
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if _, ok := r.nodes[nodeID]; !ok {
+		r.mu.Unlock()
 		return errors.New("unknown node")
 	}
 	if r.disks[nodeID] == nil {
@@ -182,33 +191,41 @@ func (r *Registry) UpsertDisk(nodeID, path string, capacity, used, limit int64) 
 	dp.Capacity = capacity
 	dp.Used = used
 	dp.Limit = limit
+	snap := *dp
+	r.mu.Unlock()
+	r.persistDisk(snap)
 	return nil
 }
 
 // RemoveDisk removes a disk path.
 func (r *Registry) RemoveDisk(nodeID, path string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	m, ok := r.disks[nodeID]
 	if !ok {
+		r.mu.Unlock()
 		return errors.New("disk not found")
 	}
 	if _, ok := m[path]; !ok {
+		r.mu.Unlock()
 		return errors.New("disk not found")
 	}
 	delete(m, path)
+	r.mu.Unlock()
+	r.forgetDisk(nodeID, path)
 	return nil
 }
 
 // RemoveNode removes a node and its disks.
 func (r *Registry) RemoveNode(id string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if _, ok := r.nodes[id]; !ok {
+		r.mu.Unlock()
 		return errors.New("unknown node")
 	}
 	delete(r.nodes, id)
 	delete(r.disks, id)
+	r.mu.Unlock()
+	r.forgetNode(id)
 	return nil
 }
 

@@ -32,8 +32,12 @@ services:
       context: .
       dockerfile: packaging/docker/Dockerfile.dev
     depends_on: [mirymesh-dev]
+    # ノード ID はホスト名なので固定する。コンテナを作り直しても同じノードとして扱われる。
+    hostname: datanode
     volumes:
       - .:/src
+      # datanode.token と datanode.paths.json の置き場。これが無いと作り直しでトークンが消え、403 になる。
+      - dn-state:/var/lib/mirymesh
       - dn-disk1:/data/disk1
       - dn-disk2:/data/disk2
     command:
@@ -44,4 +48,4 @@ services:
       - --path=/data/disk1
       - --path=/data/disk2
       - --pair-token=${MIRYMESH_DEV_PAIR_TOKEN:-}
-volumes: { pgdata: {}, dn-disk1: {}, dn-disk2: {} }
+volumes: { pgdata: {}, dn-state: {}, dn-disk1: {}, dn-disk2: {} }

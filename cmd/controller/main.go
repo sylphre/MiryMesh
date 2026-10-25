@@ -226,6 +226,13 @@ func main() {
 		_ = authStore.Add(st.AccessKey, st.SecretKey)
 		internalToken = st.AdminToken
 	}
+	// Nodes and their disks survive a Master restart: they come back as offline and turn
+	// online on their next heartbeat, also for DataNodes that never register again.
+	if sdb, ok := setupStore.(*admin.SetupStoreDB); ok {
+		if err := reg.SetStore(sdb); err != nil {
+			slog.Warn("controller: could not restore the node list from the database", "err", err)
+		}
+	}
 	// Wire DB to Storage for bucket policy persistence
 	if ls, ok := store.(*s3api.Storage); ok {
 		if sdb, ok := setupStore.(*admin.SetupStoreDB); ok {
@@ -259,6 +266,10 @@ func main() {
 		if sdb, isDB := setupStore.(*admin.SetupStoreDB); isDB {
 			if dbConn, dbErr := sdb.DB(); dbErr == nil {
 				rs.SetDB(dbConn, sdb.Driver())
+				// Buckets and their policies survive a Master restart or update.
+				if lbErr := rs.LoadBuckets(); lbErr != nil {
+					slog.Warn("controller: could not restore the bucket list from the database", "err", lbErr)
+				}
 			}
 		}
 	}

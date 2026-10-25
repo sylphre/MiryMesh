@@ -101,6 +101,9 @@ func (r *RemoteStore) CreateBucket(bucket string) error {
 	if _, ok := r.buckets[bucket]; ok {
 		return errBucketAlreadyOwned
 	}
+	if err := r.insertBucketRow(bucket); err != nil {
+		return err
+	}
 	r.buckets[bucket] = struct{}{}
 	return nil
 }
@@ -115,6 +118,9 @@ func (r *RemoteStore) DeleteBucket(bucket string) error {
 	}
 	if len(res.Objects) > 0 || len(res.CommonPrefixes) > 0 {
 		return errBucketNotEmpty
+	}
+	if err = r.deleteBucketRow(bucket); err != nil {
+		return err
 	}
 	r.mu.Lock()
 	delete(r.buckets, bucket)
@@ -147,6 +153,9 @@ func (r *RemoteStore) PutBucketPolicy(bucket string, policyJSON []byte) error {
 	if !r.BucketExists(bucket) {
 		return errNoSuchBucket
 	}
+	if err := r.saveBucketPolicy(bucket, policyJSON); err != nil {
+		return err
+	}
 	cp := make([]byte, len(policyJSON))
 	copy(cp, policyJSON)
 	r.mu.Lock()
@@ -163,6 +172,9 @@ func (r *RemoteStore) DeleteBucketPolicy(bucket string) error {
 	defer r.mu.Unlock()
 	if _, ok := r.bucketPolicy[bucket]; !ok {
 		return errNoSuchBucketPolicy
+	}
+	if err := r.saveBucketPolicy(bucket, nil); err != nil {
+		return err
 	}
 	delete(r.bucketPolicy, bucket)
 	return nil
