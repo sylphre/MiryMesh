@@ -243,6 +243,9 @@ func main() {
 			}
 		}
 	}
+	// Gateway mode: swap the bucket-only placeholder for a RemoteStore now that the
+	// registry, resolver and internal token are final, so object I/O reaches the DataNodes.
+	store = gatewayStore(store, reg, resolver, internalToken)
 	s3Router := s3api.NewRouterWithPlacement(store, cfg.Server.Region, resolver)
 	adminHandler := admin.NewWithSetup(reg, store, resolver, jobsStore, internalToken, setupStore, authStore)
 	adminHandler.SetDBConfig(cfg.DB.Driver, cfg.DB.DSN)
@@ -420,6 +423,15 @@ func (g *gatewayPlaceholder) FilesystemCapacity() int64 { return 0 }
 func (g *gatewayPlaceholder) FilesystemAvail() int64    { return 0 }
 func (g *gatewayPlaceholder) FilesystemUsed() int64     { return 0 }
 func (g *gatewayPlaceholder) IsOverQuota(int64) bool    { return false }
+
+// gatewayStore returns a RemoteStore when store is still the gateway placeholder,
+// and returns store unchanged otherwise (standalone mode).
+func gatewayStore(store s3api.ObjectStore, reg *datanode.Registry, resolver *placement.Resolver, token string) s3api.ObjectStore {
+	if _, ok := store.(*gatewayPlaceholder); !ok {
+		return store
+	}
+	return s3api.NewRemoteStoreWithResolver(reg, placement.New(0), resolver, token)
+}
 
 func detectTailscaleIP() string {
 	out, err := os.ReadFile("/proc/net/route")
