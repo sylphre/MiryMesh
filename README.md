@@ -97,7 +97,7 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 | `--skip-db-check` | Master の DB 有無チェックを飛ばす |
 | `--db-driver postgres\|mysql` | Master で使う DB（両方入っているときに選ぶ。省略すると対話で聞く） |
 | `--db-user NAME` / `--db-name NAME` / `--db-password PASS` | 作成する DB ユーザー、データベース名、パスワード（既定 `mirymesh` / `mirymesh` / ランダム）。名前は英数字と `_`、パスワードは英数字と `. _ ~ -` のみ |
-| `--update` | 入っている MiryMesh をその場で更新する（役割は自動判定、設定とデータは保持）。確認は出ないので、自動化向け |
+| `--update` | 入っている MiryMesh をその場で更新する（役割は自動判定、設定とデータは保持）。確認も更新先の選択も出ないので、自動化向け。手で更新するときは付けない |
 | `--yes` / `-y` | 何も聞かず、既定値で進める（スクリプト向け） |
 | `--no-self-update` | DataNode のワンクリック更新を有効にしない |
 
@@ -110,6 +110,24 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 #### 更新する
 
 新しいリリース（例: `v1.0.0-rc.1`）が公開されると、Master の Web UI の上部にお知らせが出ます。閉じたお知らせは、次のバージョンが出るまで再表示されません。
+
+**更新の順番:**
+
+1. 先に Master を更新します。Nodes 画面の「更新」ボタンは Version が Master と違うノードに出るので、DataNode を先に上げることはしません。
+2. Master が起動し、Web UI に入れることを確かめます。
+3. DataNode を 1 台ずつ更新します。ノードが Nodes 画面で online に戻ったのを確かめてから、次のノードへ進みます。
+4. すべての DataNode を更新し終えるまでは、マルチパートアップロードを使わないでください。古い DataNode は `404` を返します。
+
+**確認について:**
+
+- 下のコマンドは `--update` を付けていないので、「Update it now? (Y/n)」で止まります。内容を見てから答えてください。`--update` と `--yes` は確認なしで進むため、手で更新するときは付けません。
+- 更新の前に、変更なしで役割だけ確かめられます。矛盾があれば、更新の前にここで分かります。
+
+      curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash -s -- --check-role
+
+- 入っているバージョンより古いリリースやタグへの更新は拒否されます。意図して戻すときだけ `--allow-downgrade` を付けます。
+
+**更新の実行:**
 
 - **Master:** 次のコマンドで更新します。「Update it now? (Y/n)」と聞かれ、続けて更新先（Release / Prerelease / Dev）を選びます（`--channel` などで指定済みなら更新先は聞きません）。`--version v1.0.0-rc.1` のようにタグを固定することもできます。
 
