@@ -4,14 +4,9 @@
 package s3api
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/xml"
-	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -70,27 +65,29 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 			return
 		}
 	}
-	// For range, get size before reading all; validate then slice.
-	// TODO: streaming range copy without full ReadAll for large sources.
-	srcData, err3 := io.ReadAll(rc)
-	if err3 != nil {
-		writeXMLError(w, r, 500, "InternalError", err3.Error())
-		return
-	}
+	// Stream the source: skip to the start of the range and read only the range,
+	// so a large source object is never held in memory.
+	partSize := srcMeta.Size
+	var partSrc io.Reader = rc
 	rangeHeader := r.Header.Get("x-amz-copy-source-range")
 	if rangeHeader == "" {
 		rangeHeader = r.Header.Get("X-Amz-Copy-Source-Range")
 	}
 	if rangeHeader != "" {
-		start, end, ok := parseCopyRange(rangeHeader, int64(len(srcData)))
+		start, end, ok := parseCopyRange(rangeHeader, srcMeta.Size)
 		if !ok {
 			writeError(w, r, APIError{Code: "InvalidRequest", Message: "The x-amz-copy-source-range value must be of the form bytes=start-end", Status: 400})
 			return
 		}
-		srcData = srcData[start : end+1]
+		if _, skipErr := io.CopyN(io.Discard, rc, int64(start)); skipErr != nil {
+			writeXMLError(w, r, 500, "InternalError", skipErr.Error())
+			return
+		}
+		partSize = int64(end) - int64(start) + 1
+		partSrc = io.LimitReader(rc, partSize)
 	}
 	// Pending parts count towards the bucket quota.
-	if rt.rejectOverQuota(w, r, bucket, "", int64(len(srcData))) {
+	if rt.rejectOverQuota(w, r, bucket, "", partSize) {
 		return
 	}
 	// The part follows the upload's settings: same SSE-C key, same checksum algorithm.
@@ -99,49 +96,18 @@ func (rt *Router) handleUploadPartCopy(w http.ResponseWriter, r *http.Request, b
 		writeFailure(w, r, cfgErr)
 		return
 	}
-	pw, prepErr := preparePart(r.Header, cfg, strings.NewReader(string(srcData)))
+	pw, prepErr := preparePart(r.Header, cfg, partSrc)
 	if prepErr != nil {
 		writeFailure(w, r, prepErr)
 		return
 	}
-	// Write part file via streaming hash (already have srcData but keep streaming path for consistency).
-	dir := rt.store.MultipartDir(uploadID)
-	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
-		writeXMLError(w, r, 500, "InternalError", mkErr.Error())
+	// The store writes the part (a local file, or a DataNode in gateway mode) and records it.
+	rec, upErr := rt.store.UploadPart(uploadID, partNumber, pw.body)
+	if upErr != nil {
+		writeFailure(w, r, upErr)
 		return
 	}
-	path := filepath.Join(dir, fmt.Sprintf("part-%05d", partNumber))
-	tmp := path + ".tmp"
-	f, openErr := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
-	if openErr != nil {
-		writeXMLError(w, r, 500, "InternalError", openErr.Error())
-		return
-	}
-	h := md5.New()
-	if _, copyErr := io.Copy(io.MultiWriter(f, h), pw.body); copyErr != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		writeXMLError(w, r, 500, "InternalError", copyErr.Error())
-		return
-	}
-	if closeErr := f.Close(); closeErr != nil {
-		_ = os.Remove(tmp)
-		writeXMLError(w, r, 500, "InternalError", closeErr.Error())
-		return
-	}
-	etag := hex.EncodeToString(h.Sum(nil))
-	if renameErr := os.Rename(tmp, path); renameErr != nil {
-		_ = os.Remove(tmp)
-		writeXMLError(w, r, 500, "InternalError", renameErr.Error())
-		return
-	}
-	rec := PartRecord{PartNumber: partNumber, ETag: etag, Size: int64(len(srcData)), Path: path}
-	if st := rt.store.GetUpload(uploadID); st != nil {
-		if st.Parts == nil {
-			st.Parts = make(map[int]PartRecord)
-		}
-		st.Parts[partNumber] = rec
-	}
+	etag := rec.ETag
 	if doc := pw.doc(cfg); doc != (mpPart{}) {
 		if perr := rt.putDoc(bucket, mpPartKey(uploadID, partNumber), subMPPart, doc); perr != nil {
 			writeFailure(w, r, perr)

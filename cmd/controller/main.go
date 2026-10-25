@@ -246,6 +246,15 @@ func main() {
 	// Gateway mode: swap the bucket-only placeholder for a RemoteStore now that the
 	// registry, resolver and internal token are final, so object I/O reaches the DataNodes.
 	store = gatewayStore(store, reg, resolver, internalToken)
+	// The gateway keeps S3 subresource documents (multipart config and parts, SSE-C and
+	// checksum records, ACL, tagging, CORS, lifecycle, quota) in the same database.
+	if rs, isRemote := store.(*s3api.RemoteStore); isRemote {
+		if sdb, isDB := setupStore.(*admin.SetupStoreDB); isDB {
+			if dbConn, dbErr := sdb.DB(); dbErr == nil {
+				rs.SetDB(dbConn, sdb.Driver())
+			}
+		}
+	}
 	s3Router := s3api.NewRouterWithPlacement(store, cfg.Server.Region, resolver)
 	adminHandler := admin.NewWithSetup(reg, store, resolver, jobsStore, internalToken, setupStore, authStore)
 	adminHandler.SetDBConfig(cfg.DB.Driver, cfg.DB.DSN)

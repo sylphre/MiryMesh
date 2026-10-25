@@ -335,6 +335,9 @@ func (rt *Router) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		}
 		putBody = putEnc.wrap(putBody)
 	}
+	// RemoteStore uses the size to choose a DataNode and to stream the body
+	// without buffering it. -1 (unknown) leaves the body unchanged.
+	putBody = withSizeHint(putBody, requestBodySize(r))
 	m, err := rt.store.PutObject(bucket, key, ct, meta, putBody)
 	if err != nil {
 		// BadDigest (from the verifier) and storage errors alike.
@@ -423,15 +426,13 @@ func (rt *Router) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 				_, _ = seeker.Seek(start, io.SeekStart)
 				bodyReader = io.LimitReader(seeker, length)
 			} else {
-				// Fallback: copy and slice.
-				data, _ := io.ReadAll(rc)
-				if start < int64(len(data)) {
-					if end >= int64(len(data)) {
-						end = int64(len(data)) - 1
-					}
-					bodyReader = strings.NewReader(string(data[start : end+1]))
-					length = end - start + 1
+				// Not seekable (for example an HTTP body from a DataNode): skip
+				// the leading bytes instead of buffering the whole object.
+				if _, skipErr := io.CopyN(io.Discard, rc, start); skipErr != nil {
+					writeXMLError(w, r, http.StatusInternalServerError, "InternalError", skipErr.Error())
+					return
 				}
+				bodyReader = io.LimitReader(rc, length)
 			}
 			w.Header().Set("Content-Range", "bytes "+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10)+"/"+strconv.FormatInt(size, 10))
 			w.Header().Set("Content-Length", strconv.FormatInt(length, 10))

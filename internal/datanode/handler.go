@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -82,6 +83,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Master-triggered self-update (needs the node token; 404 unless an updater is installed)
 	mux.HandleFunc("/internal/update", h.handleUpdate)
 	mux.HandleFunc("/internal/paths", h.handlePaths)
+	// Multipart uploads for gateway mode (node token required; 501 unless the store supports it)
+	mux.HandleFunc("/internal/multipart/", h.handleMultipart)
 }
 
 type registerReq struct {
@@ -443,6 +446,10 @@ func (h *Handler) handleObjects(w http.ResponseWriter, r *http.Request) {
 		}
 		defer rc.Close()
 		w.Header().Set("ETag", meta.ETag)
+		w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
+		if !meta.LastMod.IsZero() {
+			w.Header().Set("Last-Modified", meta.LastMod.UTC().Format(http.TimeFormat))
+		}
 		if meta.ContentType != "" {
 			w.Header().Set("Content-Type", meta.ContentType)
 		}
@@ -458,6 +465,10 @@ func (h *Handler) handleObjects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("ETag", meta.ETag)
+		w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
+		if !meta.LastMod.IsZero() {
+			w.Header().Set("Last-Modified", meta.LastMod.UTC().Format(http.TimeFormat))
+		}
 		if meta.ContentType != "" {
 			w.Header().Set("Content-Type", meta.ContentType)
 		}

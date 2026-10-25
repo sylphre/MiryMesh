@@ -4,7 +4,6 @@
 package s3api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,13 +24,23 @@ type RemoteStore struct {
 	resolver interface {
 		PolicyFor(bucket string) placement.Policy
 	}
-	engine *placement.Engine
-	client *http.Client
-	token  string
+	engine     *placement.Engine
+	client     *http.Client
+	dataClient *http.Client // object bodies: no total timeout, so large files can stream
+	token      string
+	// mpNode remembers which DataNode holds each multipart upload (upload ID -> node ID).
+	// mpComplete is the client for CompleteMultipartUpload, which can run for minutes.
+	mpMu       sync.Mutex
+	mpNode     map[string]string
+	mpComplete *http.Client
 	// local bucket set (controller holds bucket existence)
 	buckets      map[string]struct{}
 	bucketPolicy map[string][]byte
 	mu           sync.RWMutex
+
+	// S3 subresource documents (multipart config and parts, SSE-C and checksum
+	// records, ACL, tagging, CORS, lifecycle, quota). See remote_store_subresources.go.
+	subresDB
 }
 
 // NewRemoteStore creates a RemoteStore. buckets may be empty and filled via CreateBucket.
@@ -52,6 +61,7 @@ func NewRemoteStoreWithResolver(reg *datanode.Registry, engine *placement.Engine
 		resolver:     resolver,
 		engine:       engine,
 		client:       &http.Client{Timeout: 30 * time.Second, Transport: &nodeTokenTransport{reg: reg, token: token, base: http.DefaultTransport}},
+		dataClient:   newDataClient(reg, token),
 		token:        token,
 		buckets:      make(map[string]struct{}),
 		bucketPolicy: make(map[string][]byte),
@@ -178,14 +188,19 @@ func (r *RemoteStore) PutObject(bucket, key string, contentType string, meta map
 	if !r.BucketExists(bucket) {
 		return ObjectMeta{}, errNoSuchBucket
 	}
-	// Stream: use io.Pipe to avoid holding full body in memory where possible.
-	// For MVP, still need size for placement — read size hint from ContentLength if available, else buffer.
-	// We buffer to know targets, but stream via Pipe to DataNode.
-	data, err := io.ReadAll(body)
-	if err != nil {
-		return ObjectMeta{}, err
+	// Stream the body to the DataNode. The placement engine needs the size up
+	// front: the S3 handler passes it with withSizeHint. Without it the body is
+	// spooled to a temporary file (disk, not memory) to learn the size.
+	size := bodySizeHint(body)
+	if size < 0 {
+		spool, n, cleanup, spoolErr := spoolBody(body)
+		if spoolErr != nil {
+			return ObjectMeta{}, spoolErr
+		}
+		defer cleanup()
+		body, size = spool, n
 	}
-	targets, err := r.selectTargets(bucket, int64(len(data)))
+	targets, err := r.selectTargets(bucket, size)
 	if err != nil {
 		return ObjectMeta{}, fmt.Errorf("insufficient storage: %w", err)
 	}
@@ -203,7 +218,20 @@ func (r *RemoteStore) PutObject(bucket, key string, contentType string, meta map
 	if tgt.Path != "" {
 		urlStr += "?disk=" + url.QueryEscape(tgt.Path)
 	}
-	req, _ := http.NewRequest("PUT", urlStr, bytes.NewReader(data))
+	// A read error from the caller's body (for example a failed checksum) must
+	// reach the caller unchanged, and the DataNode must never receive a complete
+	// body for it: lastByteHold keeps the final byte back until the source ends
+	// cleanly.
+	src := &readErrTracker{src: body}
+	var reqBody io.Reader = http.NoBody
+	if size > 0 {
+		reqBody = &lastByteHold{src: src}
+	}
+	req, err := http.NewRequest("PUT", urlStr, reqBody)
+	if err != nil {
+		return ObjectMeta{}, err
+	}
+	req.ContentLength = size
 	req.Header.Set("Content-Type", contentType)
 	for k, v := range meta {
 		req.Header.Set("X-Amz-Meta-"+k, v)
@@ -211,8 +239,11 @@ func (r *RemoteStore) PutObject(bucket, key string, contentType string, meta map
 	if r.token != "" {
 		req.Header.Set("X-Internal-Token", r.token)
 	}
-	resp, err := r.client.Do(req)
+	resp, err := r.bodyClient().Do(req)
 	if err != nil {
+		if readErr := src.Err(); readErr != nil {
+			return ObjectMeta{}, readErr
+		}
 		return ObjectMeta{}, err
 	}
 	defer resp.Body.Close()
@@ -222,7 +253,7 @@ func (r *RemoteStore) PutObject(bucket, key string, contentType string, meta map
 	}
 	// Return meta from local computation (ETag via md5 already done in data path would be re-computed by datanode)
 	// For MVP, return synthetic meta
-	return ObjectMeta{Key: key, Size: int64(len(data)), ETag: resp.Header.Get("ETag"), ContentType: contentType, Meta: meta}, nil
+	return ObjectMeta{Key: key, Size: size, ETag: resp.Header.Get("ETag"), ContentType: contentType, Meta: meta}, nil
 }
 
 func (r *RemoteStore) GetObject(bucket, key string) (ObjectMeta, io.ReadCloser, error) {
@@ -256,13 +287,13 @@ func (r *RemoteStore) getObjectFailover(bucket, key string, head bool) (ObjectMe
 		if r.token != "" {
 			req.Header.Set("X-Internal-Token", r.token)
 		}
-		resp, err := r.client.Do(req)
+		resp, err := r.bodyClient().Do(req)
 		if err != nil {
 			lastErr = err
 			continue
 		}
 		if resp.StatusCode == 200 {
-			meta := ObjectMeta{Key: key, ContentType: resp.Header.Get("Content-Type")}
+			meta := objectMetaFromResponse(key, resp)
 			return meta, resp.Body, nil
 		}
 		_ = resp.Body.Close()
@@ -363,171 +394,6 @@ func (r *RemoteStore) ListObjectsV2(bucket, prefix, delimiter, continuationToken
 	return mergeListings(pages, maxKeys), nil
 }
 
-// Multipart: delegate to first target DataNode (DataNode's LocalStore handles multipart)
-func (r *RemoteStore) CreateMultipartUpload(bucket, key, contentType string, meta map[string]string) (*MultipartUploadState, error) {
-	if !r.BucketExists(bucket) {
-		return nil, errNoSuchBucket
-	}
-	targets, err := r.selectTargets(bucket, 0)
-	if err != nil {
-		return nil, fmt.Errorf("insufficient storage: %w", err)
-	}
-	if len(targets) == 0 {
-		return nil, fmt.Errorf("no targets")
-	}
-	nodeAddr := r.nodeAddr(targets[0].NodeID)
-	urlStr := fmt.Sprintf("http://%s/internal/multipart/%s/%s", nodeAddr, url.PathEscape(bucket), url.PathEscape(key))
-	req, _ := http.NewRequest("POST", urlStr+"?uploads", nil)
-	if r.token != "" {
-		req.Header.Set("X-Internal-Token", r.token)
-	}
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("remote create multipart %d: %s", resp.StatusCode, string(body))
-	}
-	var st MultipartUploadState
-	_ = json.NewDecoder(resp.Body).Decode(&st)
-	return &st, nil
-}
-func (r *RemoteStore) UploadPart(uploadID string, partNumber int, body io.Reader) (PartRecord, error) {
-	// UploadPart is called without bucket/key context — need to store mapping. For MVP, assume last target.
-	// This path is used by Router's UploadPart which has uploadID only — delegate to any online node that has the upload.
-	for _, n := range r.reg.ListNodes() {
-		if n.Status != datanode.StatusOnline {
-			continue
-		}
-		urlStr := fmt.Sprintf("http://%s/internal/multipart/part?uploadId=%s&partNumber=%d", n.Addr, url.QueryEscape(uploadID), partNumber)
-		req, _ := http.NewRequest("PUT", urlStr, body)
-		if r.token != "" {
-			req.Header.Set("X-Internal-Token", r.token)
-		}
-		resp, err := r.client.Do(req)
-		if err != nil {
-			continue
-		}
-		if resp.StatusCode == 200 {
-			var rec PartRecord
-			_ = json.NewDecoder(resp.Body).Decode(&rec)
-			_ = resp.Body.Close()
-			return rec, nil
-		}
-		_ = resp.Body.Close()
-	}
-	return PartRecord{}, fmt.Errorf("no node accepted part")
-}
-func (r *RemoteStore) ListParts(uploadID string) ([]PartRecord, error) {
-	for _, n := range r.reg.ListNodes() {
-		if n.Status != datanode.StatusOnline {
-			continue
-		}
-		urlStr := fmt.Sprintf("http://%s/internal/multipart/list?uploadId=%s", n.Addr, url.QueryEscape(uploadID))
-		req, _ := http.NewRequest("GET", urlStr, nil)
-		if r.token != "" {
-			req.Header.Set("X-Internal-Token", r.token)
-		}
-		resp, err := r.client.Do(req)
-		if err != nil {
-			continue
-		}
-		if resp.StatusCode == 200 {
-			var out []PartRecord
-			_ = json.NewDecoder(resp.Body).Decode(&out)
-			_ = resp.Body.Close()
-			return out, nil
-		}
-		_ = resp.Body.Close()
-	}
-	return nil, fmt.Errorf("no such upload")
-}
-func (r *RemoteStore) ListMultipartUploads(bucket string) ([]*MultipartUploadState, error) {
-	seen := map[string]*MultipartUploadState{}
-	for _, n := range r.reg.ListNodes() {
-		if n.Status != datanode.StatusOnline {
-			continue
-		}
-		urlStr := fmt.Sprintf("http://%s/internal/multipart/list-uploads?bucket=%s", n.Addr, url.QueryEscape(bucket))
-		req, _ := http.NewRequest("GET", urlStr, nil)
-		if r.token != "" {
-			req.Header.Set("X-Internal-Token", r.token)
-		}
-		resp, err := r.client.Do(req)
-		if err != nil {
-			continue
-		}
-		var list []*MultipartUploadState
-		_ = json.NewDecoder(resp.Body).Decode(&list)
-		_ = resp.Body.Close()
-		for _, u := range list {
-			if _, ok := seen[u.UploadID]; !ok {
-				seen[u.UploadID] = u
-			}
-		}
-	}
-	out := make([]*MultipartUploadState, 0, len(seen))
-	for _, v := range seen {
-		out = append(out, v)
-	}
-	return out, nil
-}
-func (r *RemoteStore) AbortMultipartUpload(uploadID string) error {
-	var lastErr error
-	for _, n := range r.reg.ListNodes() {
-		if n.Status != datanode.StatusOnline {
-			continue
-		}
-		urlStr := fmt.Sprintf("http://%s/internal/multipart/abort?uploadId=%s", n.Addr, url.QueryEscape(uploadID))
-		req, _ := http.NewRequest("DELETE", urlStr, nil)
-		if r.token != "" {
-			req.Header.Set("X-Internal-Token", r.token)
-		}
-		resp, err := r.client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode == 204 || resp.StatusCode == 200 {
-			return nil
-		}
-		lastErr = fmt.Errorf("abort %d", resp.StatusCode)
-	}
-	if lastErr != nil {
-		return lastErr
-	}
-	return fmt.Errorf("no such upload")
-}
-func (r *RemoteStore) CompleteMultipartUpload(uploadID string, parts []CompletePart) (ObjectMeta, error) {
-	b, _ := json.Marshal(map[string]any{"parts": parts})
-	for _, n := range r.reg.ListNodes() {
-		if n.Status != datanode.StatusOnline {
-			continue
-		}
-		urlStr := fmt.Sprintf("http://%s/internal/multipart/complete?uploadId=%s", n.Addr, url.QueryEscape(uploadID))
-		req, _ := http.NewRequest("POST", urlStr, bytes.NewReader(b))
-		req.Header.Set("Content-Type", "application/json")
-		if r.token != "" {
-			req.Header.Set("X-Internal-Token", r.token)
-		}
-		resp, err := r.client.Do(req)
-		if err != nil {
-			continue
-		}
-		if resp.StatusCode == 200 {
-			var meta ObjectMeta
-			_ = json.NewDecoder(resp.Body).Decode(&meta)
-			_ = resp.Body.Close()
-			return meta, nil
-		}
-		_ = resp.Body.Close()
-	}
-	return ObjectMeta{}, fmt.Errorf("complete failed")
-}
-
 func (r *RemoteStore) nodeAddr(nodeID string) string {
 	for _, n := range r.reg.ListNodes() {
 		if n.ID == nodeID {
@@ -537,7 +403,7 @@ func (r *RemoteStore) nodeAddr(nodeID string) string {
 	return ""
 }
 
-func (r *RemoteStore) GetUpload(uploadID string) *MultipartUploadState { return nil }
-func (r *RemoteStore) MultipartDir(uploadID string) string             { return "" }
+// GetUpload is in remote_store_multipart.go: it asks the DataNode that holds the upload.
+func (r *RemoteStore) MultipartDir(uploadID string) string { return "" }
 
 var _ ObjectStore = (*RemoteStore)(nil)
