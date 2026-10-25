@@ -81,6 +81,13 @@ func main() {
 		}
 		store = ls
 	}
+	// Request bodies of unknown size are spooled below the data dir, never in /tmp:
+	// the unit runs with ProtectSystem=strict, so /tmp can be read-only.
+	if cfg.Server.DataDir != "" {
+		if spoolErr := s3api.SetSpoolDir(filepath.Join(cfg.Server.DataDir, "tmp")); spoolErr != nil {
+			slog.Warn("controller: spool dir unavailable, uploads of unknown size may fail", "err", spoolErr)
+		}
+	}
 	// Adoption mode: load snapshot early to restore storage, then restore placement after resolver
 	var adoptedSnapshot *metadata.EvacuationSnapshot
 	// Adoption mode: try to load latest evacuation snapshot from local + datanode remote dirs

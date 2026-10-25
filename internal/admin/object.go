@@ -96,7 +96,9 @@ func (h *Handler) uploadObject(w http.ResponseWriter, r *http.Request, bucket, k
 		writeObjectError(w, err)
 		return
 	}
-	body := http.MaxBytesReader(w, r.Body, maxAdminUploadBytes)
+	// Pass the Content-Length on, so the store can stream the body instead of
+	// spooling it to disk to learn its size. -1 (unknown) leaves the reader as is.
+	body := s3api.WithSizeHint(http.MaxBytesReader(w, r.Body, maxAdminUploadBytes), r.ContentLength)
 	meta, err := h.storage.PutObject(bucket, key, r.Header.Get("Content-Type"), nil, body)
 	if err != nil {
 		writeObjectError(w, err)

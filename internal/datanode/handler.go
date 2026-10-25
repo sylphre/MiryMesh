@@ -63,6 +63,13 @@ func NewHandlerWithEvacDir(reg *Registry, token, evacDir string) *Handler {
 	return &Handler{registry: reg, token: token, evacDir: evacDir}
 }
 
+// SetEvacDir sets the directory used by /internal/evacuate and /internal/restore.
+// Call it before the handler serves requests. Without it the handlers fall back
+// to os.TempDir(), which is read-only under ProtectSystem=strict.
+func (h *Handler) SetEvacDir(dir string) {
+	h.evacDir = dir
+}
+
 // NewHandlerWithObjects creates a DataNode-side Handler with local store bound.
 func NewHandlerWithObjects(reg *Registry, token string, store interface{}) *Handler {
 	return &Handler{registry: reg, token: token, store: store}

@@ -88,6 +88,7 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, cfg conf
 
 	// Internal datanode (on admin port as well for simplicity; S3 port also serves /internal)
 	dnHandler := datanode.NewHandler(reg, internalToken)
+	dnHandler.SetEvacDir(controllerEvacDir(cfg))
 	// UI-issued one-time pair tokens are accepted by /internal/register.
 	if sdb, ok := setupStore.(*admin.SetupStoreDB); ok && sdb != nil {
 		dnHandler.SetPairConsumer(sdb.ConsumePairToken)
@@ -188,6 +189,19 @@ func newAdminEngine(h *admin.Handler, setupStore admin.SetupStoreIface, cfg conf
 	return r
 }
 
+// controllerEvacDir returns the evacuation directory: MIRYMESH_EVAC_DIR, or
+// <data_dir>/.evac (the same place main.go reads at startup). It is never /tmp.
+// Empty means no data_dir is configured.
+func controllerEvacDir(cfg config.Config) string {
+	if d := os.Getenv("MIRYMESH_EVAC_DIR"); d != "" {
+		return d
+	}
+	if cfg.Server.DataDir == "" {
+		return ""
+	}
+	return filepath.Join(cfg.Server.DataDir, ".evac")
+}
+
 func newS3Engine(router *s3api.Router, authStore *auth.Store, userMgr *users.Manager, cfg config.Config, reg *datanode.Registry, internalToken string, setupStore admin.SetupStoreIface) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -197,6 +211,7 @@ func newS3Engine(router *s3api.Router, authStore *auth.Store, userMgr *users.Man
 	r.GET("/health", func(c *gin.Context) { c.String(200, "ok") })
 	// Internal on S3 port too
 	dnHandler := datanode.NewHandler(reg, internalToken)
+	dnHandler.SetEvacDir(controllerEvacDir(cfg))
 	// UI-issued one-time pair tokens are accepted on this port as well.
 	if sdb, ok := setupStore.(*admin.SetupStoreDB); ok && sdb != nil {
 		dnHandler.SetPairConsumer(sdb.ConsumePairToken)

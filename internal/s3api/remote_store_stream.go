@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,6 +63,12 @@ func withSizeHint(r io.Reader, size int64) io.Reader {
 	return &sizedReader{Reader: r, size: size}
 }
 
+// WithSizeHint is withSizeHint for callers outside this package (for example the
+// admin console upload), which know the request's Content-Length.
+func WithSizeHint(r io.Reader, size int64) io.Reader {
+	return withSizeHint(r, size)
+}
+
 // bodySizeHint returns the size set by withSizeHint, or -1 when unknown.
 func bodySizeHint(r io.Reader) int64 {
 	if h, ok := r.(sizeHinted); ok {
@@ -69,11 +77,51 @@ func bodySizeHint(r io.Reader) int64 {
 	return -1
 }
 
+// spoolPrefix is the file name prefix of spooled request bodies.
+const spoolPrefix = "mirymesh-put-"
+
+var (
+	spoolMu  sync.RWMutex
+	spoolDir string
+)
+
+// SetSpoolDir sets the directory where request bodies of unknown size are
+// spooled. The controller points it below its data directory, because the
+// systemd unit runs with ProtectSystem=strict and /tmp may be read-only. The
+// directory is created (0700) and spool files left by a crashed run are
+// removed. An empty dir restores the default (os.TempDir), which is only meant
+// for tests and library use.
+func SetSpoolDir(dir string) error {
+	if dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if entries, err := os.ReadDir(dir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasPrefix(e.Name(), spoolPrefix) {
+					_ = os.Remove(filepath.Join(dir, e.Name()))
+				}
+			}
+		}
+	}
+	spoolMu.Lock()
+	spoolDir = dir
+	spoolMu.Unlock()
+	return nil
+}
+
+func currentSpoolDir() string {
+	spoolMu.RLock()
+	defer spoolMu.RUnlock()
+	return spoolDir
+}
+
 // spoolBody copies r into a temporary file and returns it, rewound, with its
 // size. cleanup closes and removes the file. Used when the size is unknown, so
-// the body goes to disk instead of memory.
+// the body goes to disk instead of memory. The file is created in the directory
+// set by SetSpoolDir.
 func spoolBody(r io.Reader) (*os.File, int64, func(), error) {
-	f, err := os.CreateTemp("", "mirymesh-put-*")
+	f, err := os.CreateTemp(currentSpoolDir(), spoolPrefix+"*")
 	if err != nil {
 		return nil, 0, nil, err
 	}
