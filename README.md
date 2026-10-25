@@ -97,13 +97,13 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 | `--skip-db-check` | Master の DB 有無チェックを飛ばす |
 | `--db-driver postgres\|mysql` | Master で使う DB（両方入っているときに選ぶ。省略すると対話で聞く） |
 | `--db-user NAME` / `--db-name NAME` / `--db-password PASS` | 作成する DB ユーザー、データベース名、パスワード（既定 `mirymesh` / `mirymesh` / ランダム）。名前は英数字と `_`、パスワードは英数字と `. _ ~ -` のみ |
-| `--update` | 入っている MiryMesh をその場で更新する（役割は自動判定、設定とデータは保持） |
+| `--update` | 入っている MiryMesh をその場で更新する（役割は自動判定、設定とデータは保持）。確認は出ないので、自動化向け |
 | `--yes` / `-y` | 何も聞かず、既定値で進める（スクリプト向け） |
 | `--no-self-update` | DataNode のワンクリック更新を有効にしない |
 
 #### 対話式で入れる
 
-すでに MiryMesh が入っているホストで `--master` / `--client` を付けずに実行すると、役割などは聞かず「更新しますか？」だけを聞きます。Dev ビルドで更新するときは `--update --dev [--branch NAME]` を付けます。入れ直したいときは `--master` / `--client` を付けて実行します。
+すでに MiryMesh が入っているホストで `--master` / `--client` を付けずに実行すると、役割などは聞かず「更新しますか？」だけを聞きます。Dev ビルドで更新するときは `--dev [--branch NAME]` を付けます。入れ直したいときは `--master` / `--client` を付けて実行します。
 
 まだ入っていないホストで `--master` / `--client` を付けずに実行すると、役割、インストール方法（Release / Prerelease / Dev）、Master の URL、ペアリングトークン、保存先を順に聞き、最後に内容を確認します。Release は `--client` ならビルド済みの DataNode、`--master` なら `release` ブランチからのソースビルドです。Prerelease は rc を含む最新リリース（`--master` なら `prerelease` ブランチ）を入れます。Dev はソースからビルドし、ブランチを指定できます（既定は `release`）。`curl ... | sudo bash` のようにパイプで渡した場合も、端末（`/dev/tty`）から読みます。聞かれたくないとき（自動化など）は `--yes` を付けます。
 
@@ -111,16 +111,16 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 
 新しいリリース（例: `v1.0.0-rc.1`）が公開されると、Master の Web UI の上部にお知らせが出ます。閉じたお知らせは、次のバージョンが出るまで再表示されません。
 
-- **Master:** 次のコマンドで更新します。`--version v1.0.0-rc.1` のようにタグを固定することもできます。
+- **Master:** 次のコマンドで更新します。「Update it now? (Y/n)」と聞かれ、続けて更新先（Release / Prerelease / Dev）を選びます（`--channel` などで指定済みなら更新先は聞きません）。`--version v1.0.0-rc.1` のようにタグを固定することもできます。
 
-      curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash -s -- --update
+      curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash -s --
 
 - **DataNode:** **Nodes** 画面の Version 列が Master と違うノードに「更新」ボタンが出ます。押すと、DataNode がリリースから静的バイナリをダウンロードして sha256 を検証し、終了します。systemd が再起動する前に、root 権限のヘルパー（`/usr/local/lib/mirymesh/apply-update.sh`）がバイナリを差し替えます。直前のバイナリは `<バイナリ>.prev` に残ります。
-- ワンクリック更新を使うには、各 DataNode で `install.sh --update` を 1 回実行して有効化します。それ以降は Master から更新できます。無効のままにしたいときは `--no-self-update` を付けます。
+- ワンクリック更新を使うには、各 DataNode で `install.sh` を（`--master` / `--client` を付けずに）1 回実行し、「Update it now? (Y/n)」に答えて有効化します。それ以降は Master から更新できます。無効のままにしたいときは `--no-self-update` を付けます。
 - 安定版のリリースがまだ無い間は、最新のプレリリースを使います。
 - チャンネルは `/etc/mirymesh/channel` に記録されます。`--update` は、入っているバージョンに `-rc.1` のような接尾辞があるか、このファイルが `prerelease` のときに prerelease チャンネルとして更新します。prerelease チャンネルの Master は、更新のお知らせにも rc を出します（`MIRYMESH_UPDATE_PRERELEASE=1`）。
 
-- **Dev ビルドから上げる:** ソースからビルドした（Dev）ホストを Release / Prerelease に移すには、`--update --channel release` または `--update --prerelease` を付けて実行します。`--update` を付けずに対話式で実行した場合は、更新の前に Release / Prerelease / Dev を選べます。Master は選んだチャンネルのブランチ（`release` / `prerelease`）から入れ直し、DataNode は配布済みバイナリを入れます。設定とデータは保持されます。
+- **Dev ビルドから上げる:** ソースからビルドした（Dev）ホストを Release / Prerelease に移すには、`--channel release` または `--prerelease` を付けて実行します。更新の確認は出ます。何も付けずに実行した場合は、更新の前に Release / Prerelease / Dev を選べます。Master は選んだチャンネルのブランチ（`release` / `prerelease`）から入れ直し、DataNode は配布済みバイナリを入れます。設定とデータは保持されます。
 - **更新のお知らせの対象:** Master の **Settings** 画面の「更新のお知らせ」で、安定版のみ / プレリリースも / インストールのチャンネルに従う、を選べます。選んだ値は DB に保存され、`install.sh` のチャンネルや `MIRYMESH_UPDATE_PRERELEASE` より優先されます。「インストールのチャンネルに従う」を選ぶと従来の挙動に戻ります。
 
 #### ソースビルド（Dev）のノードを更新する
@@ -130,12 +130,12 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 - **順番:** 先に Master、次に DataNode を 1 台ずつ更新します。ノードがオンラインに戻ったのを Nodes 画面で確かめてから次へ進みます。
 - **DataNode（ソースビルド）:** 各ノードで次を実行します。ホスト上で `git clone` と `go build` が走るので、`git` と Go が必要です。役割は自動判定され、設定とデータ（`--path`）は保持されます。
 
-      curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash -s -- --update --dev --branch master
+      curl -fsSL https://raw.githubusercontent.com/sylphre/MiryMesh/master/packaging/scripts/install.sh | sudo bash -s -- --dev --branch master
 
 - **Master（ソースビルド）:** 同じコマンドです。Master は Vue コンソールもビルドするため、Node.js 22 以上と npm も必要です。
-- 自動化するときは `--yes` を付けると、確認や選択を聞かずに進みます。
+- `--update` と `--yes` は、確認や選択を聞かずに進みます。この README の例には使っていません。スクリプトなどで自動化するときだけ付けてください。
 - ブランチやタグは `--branch NAME` / `--version TAG` で変えられます（`--version` が優先）。
-- 配布版に戻したいときは、`--update --channel release`（rc を含めるなら `--update --prerelease`）を付けて実行します。
+- 配布版に戻したいときは、`--channel release`（rc を含めるなら `--prerelease`）を付けて実行します。
 - Dev ビルドのノードでは、Nodes 画面の「更新」ボタンを押さないでください。
 
 **役割（Master / DataNode）の取り違え防止:**
