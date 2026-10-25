@@ -3,7 +3,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import Icon from '../components/Icon.vue'
-import { api } from '../lib/api.js'
+import { api, setToken } from '../lib/api.js'
 import { copyText } from '../lib/clipboard.js'
 import { confirmDialog } from '../lib/dialog.js'
 import { toastOk, toastErr } from '../lib/toast.js'
@@ -164,6 +164,33 @@ async function genCreds() {
     generating.value = false
   }
 }
+
+// Admin Token: issue a new one. The old token and all other sessions stop working at once;
+// this browser switches to the new token so the operator stays signed in.
+const rotating = ref(false)
+const newAdminToken = ref('')
+
+async function rotateAdminToken() {
+  const ok = await confirmDialog({
+    title: 'Admin Token を再発行',
+    message: '新しい Admin Token を発行します。\n古いトークンと他のログイン中のセッションはすぐに使えなくなります。\nこの画面のログインは維持されます。',
+    confirmLabel: '再発行する',
+    danger: true,
+  })
+  if (!ok) return
+  rotating.value = true
+  try {
+    const j = await api('/api/admin/rotate-token', { method: 'POST' })
+    if (!j || !j.admin_token) throw new Error('response has no admin_token')
+    setToken(j.admin_token)
+    newAdminToken.value = j.admin_token
+    toastOk('Admin Token を再発行しました')
+  } catch (e) {
+    toastErr(e)
+  } finally {
+    rotating.value = false
+  }
+}
 </script>
 
 <template>
@@ -315,6 +342,35 @@ async function genCreds() {
         <button type="button" class="btn" :disabled="generating" @click="genCreds">
           <span v-if="generating" class="spinner" aria-hidden="true"></span>
           <Icon v-else name="key" :size="16" />Generate credentials
+        </button>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="admtok-title">
+      <div class="card__head"><h2 id="admtok-title" class="card__title">Admin Token</h2></div>
+      <div class="card__body stack">
+        <p class="muted">
+          管理 API (<code>X-Admin-Token</code>) とブラウザのログインに使うトークンです。再発行すると古いトークンと他のセッションはすぐに無効になり、
+          この画面は新しいトークンで続行します。DataNode の接続は止まりません。
+        </p>
+        <div v-if="newAdminToken" class="stack">
+          <div class="field">
+            <span class="field__label">新しい Admin Token</span>
+            <div class="input-group">
+              <input class="input input--mono" readonly :value="newAdminToken" aria-label="新しい Admin Token" />
+              <button type="button" class="btn" @click="copyText(newAdminToken)"><Icon name="copy" :size="16" />Copy</button>
+            </div>
+          </div>
+          <div class="alert alert--warning">
+            <Icon name="alert" />
+            <div class="alert__body">この画面を離れるとトークンは再表示されません。CLI やスクリプトで使っている場合は、ここで置き換えてください。</div>
+          </div>
+        </div>
+      </div>
+      <div class="card__foot" style="justify-content: flex-end">
+        <button type="button" class="btn" :disabled="rotating" @click="rotateAdminToken">
+          <span v-if="rotating" class="spinner" aria-hidden="true"></span>
+          <Icon v-else name="key" :size="16" />Rotate Admin Token
         </button>
       </div>
     </section>

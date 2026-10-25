@@ -58,7 +58,8 @@ func (h *Handler) validToken(token string) bool {
 			return true
 		}
 	}
-	return h.adminToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.adminToken)) == 1
+	cur := h.currentAdminToken()
+	return cur != "" && subtle.ConstantTimeCompare([]byte(token), []byte(cur)) == 1
 }
 
 // Gin-compatible middleware (used after migration).

@@ -50,7 +50,7 @@ func (h *Handler) HandleNodeDisks(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	cred := h.registry.NodeCredential(req.NodeID, h.adminToken)
+	cred := h.registry.NodeCredential(req.NodeID, h.nodeCredentialSecret())
 	switch {
 	case !found:
 		http.Error(w, "node not found", http.StatusNotFound)

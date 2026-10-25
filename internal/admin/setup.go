@@ -128,6 +128,7 @@ func (h *Handler) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin/login", h.handleLogin)
 	mux.HandleFunc("/api/admin/generate-credentials", h.handleGenerateCredentials)
 	mux.HandleFunc("/api/admin/pair-token", h.handlePairToken)
+	mux.HandleFunc("/api/admin/rotate-token", h.handleRotateToken)
 }
 
 func (h *Handler) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
@@ -320,7 +321,10 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		if sdb, ok := h.setupStore.(*SetupStoreDB); ok {
 			_ = sdb.CreateSession(token, st.AdminUsername, 24*60*60*1e9)
 		}
+		h.tokMu.Lock()
 		h.adminToken = token
+		h.nodeSecret = token
+		h.tokMu.Unlock()
 		if h.resolver != nil && st.DefaultPolicy != "" {
 			if p, err := placement.ParsePolicy(st.DefaultPolicy); err == nil {
 				_ = h.resolver.SetDefaultPolicy(p)

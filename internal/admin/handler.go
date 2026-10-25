@@ -5,6 +5,7 @@ package admin
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/sylphre/MiryMesh/internal/auth"
 	"github.com/sylphre/MiryMesh/internal/datanode"
@@ -42,6 +43,14 @@ type Handler struct {
 	userMgr    *users.Manager
 	updates    *updater.Checker
 	region     RegionController
+
+	// tokMu guards adminToken, which POST /api/admin/rotate-token replaces at runtime.
+	tokMu sync.RWMutex
+	// nodeSecret is the secret the legacy per-node credential is derived from.
+	// It is set when the Master starts and is not changed by a rotation.
+	nodeSecret string
+	// rotateMu serializes token rotations.
+	rotateMu sync.Mutex
 }
 
 // New creates a Handler.
@@ -55,7 +64,7 @@ func NewWithSetup(reg *datanode.Registry, storage s3api.ObjectStore, resolver *p
 		jobs = replication.NewStore()
 	}
 	metrics := NewMetrics()
-	return &Handler{registry: reg, storage: storage, resolver: resolver, jobs: jobs, adminToken: adminToken, setupStore: setup, authStore: authStore, metrics: metrics}
+	return &Handler{registry: reg, storage: storage, resolver: resolver, jobs: jobs, adminToken: adminToken, nodeSecret: adminToken, setupStore: setup, authStore: authStore, metrics: metrics}
 }
 
 // SetDBConfig sets the runtime DB driver/DSN for db_configured reporting when setup is not yet initialized.

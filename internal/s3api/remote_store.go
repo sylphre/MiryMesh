@@ -64,13 +64,21 @@ func (r *RemoteStore) WithResolver(resolver interface {
 	r.resolver = resolver
 }
 
-// local bucket helpers
-func (r *RemoteStore) BucketExists(bucket string) bool { _, ok := r.buckets[bucket]; return ok }
+// local bucket helpers. r.mu guards both r.buckets and r.bucketPolicy.
+// Never call another locking method of RemoteStore while holding r.mu.
+func (r *RemoteStore) BucketExists(bucket string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.buckets[bucket]
+	return ok
+}
 func (r *RemoteStore) ListBuckets() []string {
+	r.mu.RLock()
 	out := make([]string, 0, len(r.buckets))
 	for k := range r.buckets {
 		out = append(out, k)
 	}
+	r.mu.RUnlock()
 	sort.Strings(out)
 	return out
 }
@@ -78,6 +86,8 @@ func (r *RemoteStore) CreateBucket(bucket string) error {
 	if !isValidBucketName(bucket) {
 		return errInvalidBucketName
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if _, ok := r.buckets[bucket]; ok {
 		return errBucketAlreadyOwned
 	}
@@ -85,10 +95,10 @@ func (r *RemoteStore) CreateBucket(bucket string) error {
 	return nil
 }
 func (r *RemoteStore) DeleteBucket(bucket string) error {
-	if _, ok := r.buckets[bucket]; !ok {
+	if !r.BucketExists(bucket) {
 		return errNoSuchBucket
 	}
-	// Check not empty by fan-out list
+	// Check not empty by fan-out list. The network call runs without the lock.
 	res, err := r.ListObjectsV2(bucket, "", "", "", 1)
 	if err != nil {
 		return err
@@ -96,7 +106,10 @@ func (r *RemoteStore) DeleteBucket(bucket string) error {
 	if len(res.Objects) > 0 || len(res.CommonPrefixes) > 0 {
 		return errBucketNotEmpty
 	}
+	r.mu.Lock()
 	delete(r.buckets, bucket)
+	delete(r.bucketPolicy, bucket)
+	r.mu.Unlock()
 	return nil
 }
 func (r *RemoteStore) Root() string                      { return "" }
@@ -106,7 +119,7 @@ func (r *RemoteStore) FilesystemUsed() int64             { return 0 }
 func (r *RemoteStore) IsOverQuota(additional int64) bool { return false }
 
 func (r *RemoteStore) GetBucketPolicy(bucket string) ([]byte, error) {
-	if _, ok := r.buckets[bucket]; !ok {
+	if !r.BucketExists(bucket) {
 		return nil, errNoSuchBucket
 	}
 	r.mu.RLock()
@@ -121,7 +134,7 @@ func (r *RemoteStore) GetBucketPolicy(bucket string) ([]byte, error) {
 }
 
 func (r *RemoteStore) PutBucketPolicy(bucket string, policyJSON []byte) error {
-	if _, ok := r.buckets[bucket]; !ok {
+	if !r.BucketExists(bucket) {
 		return errNoSuchBucket
 	}
 	cp := make([]byte, len(policyJSON))
@@ -133,7 +146,7 @@ func (r *RemoteStore) PutBucketPolicy(bucket string, policyJSON []byte) error {
 }
 
 func (r *RemoteStore) DeleteBucketPolicy(bucket string) error {
-	if _, ok := r.buckets[bucket]; !ok {
+	if !r.BucketExists(bucket) {
 		return errNoSuchBucket
 	}
 	r.mu.Lock()
@@ -162,7 +175,7 @@ func (r *RemoteStore) selectTargets(bucket string, size int64) ([]placement.Targ
 }
 
 func (r *RemoteStore) PutObject(bucket, key string, contentType string, meta map[string]string, body io.Reader) (ObjectMeta, error) {
-	if _, ok := r.buckets[bucket]; !ok {
+	if !r.BucketExists(bucket) {
 		return ObjectMeta{}, errNoSuchBucket
 	}
 	// Stream: use io.Pipe to avoid holding full body in memory where possible.
@@ -225,7 +238,7 @@ func (r *RemoteStore) HeadObject(bucket, key string) (ObjectMeta, error) {
 }
 
 func (r *RemoteStore) getObjectFailover(bucket, key string, head bool) (ObjectMeta, io.ReadCloser, error) {
-	if _, ok := r.buckets[bucket]; !ok {
+	if !r.BucketExists(bucket) {
 		return ObjectMeta{}, nil, errNoSuchBucket
 	}
 	nodes := r.reg.ListNodes()
@@ -266,7 +279,7 @@ func (r *RemoteStore) getObjectFailover(bucket, key string, head bool) (ObjectMe
 }
 
 func (r *RemoteStore) DeleteObject(bucket, key string) error {
-	if _, ok := r.buckets[bucket]; !ok {
+	if !r.BucketExists(bucket) {
 		return errNoSuchBucket
 	}
 	// Fan-out delete to all online nodes (M7 batch semantics)
@@ -291,7 +304,7 @@ func (r *RemoteStore) DeleteObject(bucket, key string) error {
 }
 
 func (r *RemoteStore) ListObjectsV2(bucket, prefix, delimiter, continuationToken string, maxKeys int) (ListObjectsV2Result, error) {
-	if _, ok := r.buckets[bucket]; !ok {
+	if !r.BucketExists(bucket) {
 		return ListObjectsV2Result{}, errNoSuchBucket
 	}
 	// Fan-out: every online node returns its first maxKeys entries after the
@@ -352,7 +365,7 @@ func (r *RemoteStore) ListObjectsV2(bucket, prefix, delimiter, continuationToken
 
 // Multipart: delegate to first target DataNode (DataNode's LocalStore handles multipart)
 func (r *RemoteStore) CreateMultipartUpload(bucket, key, contentType string, meta map[string]string) (*MultipartUploadState, error) {
-	if _, ok := r.buckets[bucket]; !ok {
+	if !r.BucketExists(bucket) {
 		return nil, errNoSuchBucket
 	}
 	targets, err := r.selectTargets(bucket, 0)
