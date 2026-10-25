@@ -62,6 +62,10 @@ ASSUME_YES=""
 SELF_UPDATE="1"
 CHANNEL="${MIRYMESH_CHANNEL:-}"   # release | prerelease. Empty = decided below
 CHANNEL_FILE=/etc/mirymesh/channel
+ROLE_FILE=/etc/mirymesh/role      # "master" or "client", written by every successful install/update
+FORCE_ROLE=""
+CHECK_ROLE=""                     # --check-role: report the role of this host and stop, changing nothing
+VR_TOKEN_BEFORE="no"              # was datanode.token present before this run? (see verify_role)
 # "--opt VALUE" と "--opt=VALUE" の両方を受け付ける。前者を後者に書き換えて、後段の case で扱う。
 _left=$#
 while [ "$_left" -gt 0 ]; do
@@ -94,6 +98,8 @@ for arg in "$@"; do
     --prerelease) CHANNEL="prerelease" ;;
     --dev) MODE="from-source" ;;
     --no-enable) NO_ENABLE=1 ;;
+    --force-role) FORCE_ROLE=1 ;;
+    --check-role) CHECK_ROLE=1; ASSUME_YES=1 ;;
     --skip-db-check) SKIP_DB_CHECK=1 ;;
     --db-driver=*|--db-user=*|--db-name=*|--db-password=*) ;; # read again in the Master DB step
     --release) MODE="release" ;;
@@ -119,6 +125,8 @@ for arg in "$@"; do
       echo "  --db-user NAME / --db-name NAME / --db-password PASS  Master: role/user, database and password to create (default: mirymesh, mirymesh, random)"
       echo "  --update   Update an existing install in place (role and config are kept; --version TAG pins the release)"
       echo "  --yes, -y  Never prompt, use defaults (for scripts)"
+      echo "  --force-role  Allow a role that differs from the one recorded in /etc/mirymesh/role (dangerous)"
+      echo "  --check-role  Only report the role of this host (and verify it); change nothing. Add --master/--client to test a role"
       echo "  --no-self-update  DataNode: do not enable one-click update from the Master"
       echo "  No args    Interactive selection (Master / Client). If MiryMesh is already installed: Update only"
       exit 0
@@ -160,12 +168,46 @@ ask() {
 # --branch only makes sense for a source build.
 if [ -z "$MODE" ] && [ -n "$BRANCH" ]; then MODE="from-source"; fi
 
+# Role recorded by a previous install/update ("master" or "client"). Prints nothing when unknown.
+recorded_role() {
+  [ -f "$ROLE_FILE" ] || return 0
+  case "$(head -1 "$ROLE_FILE" 2>/dev/null)" in
+    master) echo "master" ;;
+    client) echo "client" ;;
+  esac
+  return 0
+}
+
 # What is installed on this host? Prints "master", "client" or nothing.
+# The recorded role wins. Hosts installed before the record existed fall back to guessing from files.
 detect_installed_role() {
+  _dr_r="$(recorded_role)"
+  if [ -n "$_dr_r" ]; then echo "$_dr_r"; return 0; fi
+  _dr_c=""; _dr_d=""
   if [ -f /etc/systemd/system/mirymesh-controller.service ] || [ -x /usr/local/bin/mirymesh-controller ] || [ -x /usr/bin/mirymesh-controller ]; then
-    echo "master"
-  elif [ -f /etc/systemd/system/mirymesh-datanode.service ] || [ -x /usr/local/bin/mirymesh-datanode ] || [ -x /usr/bin/mirymesh-datanode ]; then
+    _dr_c=1
+  fi
+  if [ -f /etc/systemd/system/mirymesh-datanode.service ] || [ -x /usr/local/bin/mirymesh-datanode ] || [ -x /usr/bin/mirymesh-datanode ]; then
+    _dr_d=1
+  fi
+  if [ -n "$_dr_c" ] && [ -z "$_dr_d" ]; then echo "master"; return 0; fi
+  if [ -z "$_dr_c" ] && [ -n "$_dr_d" ]; then echo "client"; return 0; fi
+  [ -n "$_dr_c" ] || return 0
+  # Both are present. Older source builds put the controller on every host, so the files alone
+  # prove nothing. Decide by which service is enabled; if that is unclear, a paired DataNode
+  # (datanode.token) means client. Guessing "client" is the safe side: it never starts a controller.
+  _dr_ce=""; _dr_de=""
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-enabled --quiet mirymesh-controller 2>/dev/null; then _dr_ce=1; fi
+    if systemctl is-enabled --quiet mirymesh-datanode 2>/dev/null; then _dr_de=1; fi
+  fi
+  if [ -n "$_dr_ce" ] && [ -z "$_dr_de" ]; then echo "master"; return 0; fi
+  if [ -z "$_dr_ce" ] && [ -n "$_dr_de" ]; then echo "client"; return 0; fi
+  if [ -s /var/lib/mirymesh/datanode.token ]; then
+    echo "role detection: controller and DataNode are both installed here; treating this host as a DataNode (pass --master to override)" >&2
     echo "client"
+  else
+    echo "master"
   fi
 }
 INSTALLED_ROLE="$(detect_installed_role)"
@@ -236,6 +278,13 @@ if [ -n "$UPDATE" ] && [ -z "$CHANNEL" ]; then
   [ -z "$CHANNEL" ] || log "Update: this host follows the $CHANNEL channel (leave it with --channel release)"
 fi
 
+# --check-role without --master/--client: check the role this host would be updated as.
+if [ -n "$CHECK_ROLE" ] && [ -z "$ROLE" ]; then
+  ROLE="$INSTALLED_ROLE"
+  [ -n "$ROLE" ] || die "--check-role: no MiryMesh install found on this host"
+  log "Check: detected role $ROLE"
+fi
+
 # Interactive selection if no role given
 if [ -z "$ROLE" ]; then
   if interactive; then
@@ -249,6 +298,103 @@ if [ -z "$ROLE" ]; then
     ROLE="master"
     log "Non-interactive and no --master/--client — defaulting to Master. Use --client --master-url URL for DataNode."
   fi
+fi
+
+# Role guard: stop before any Master step (DB, controller.env, controller service) can run on a
+# DataNode host, or the other way round. Nothing has been changed on the host yet at this point.
+if [ -z "$FORCE_ROLE" ]; then
+  _rg_rec="$(recorded_role)"
+  if [ -n "$_rg_rec" ] && [ "$_rg_rec" != "$ROLE" ]; then
+    die "role mismatch: this host is recorded as '$_rg_rec' ($ROLE_FILE) but this run would install it as '$ROLE'. Nothing was changed. Use --$([ "$_rg_rec" = "client" ] && echo client || echo master), or --force-role if you really want to switch."
+  fi
+  # No record (installed by an older install.sh): a paired DataNode token means this is a DataNode.
+  if [ -z "$_rg_rec" ] && [ "$ROLE" = "master" ] && [ -s /var/lib/mirymesh/datanode.token ]; then
+    die "role mismatch: /var/lib/mirymesh/datanode.token exists, so this host looks like a DataNode, but this run would install it as 'master'. Nothing was changed. Use --client, or --force-role if this host really is a Master."
+  fi
+fi
+
+# ---- Role verification (read-only) ----------------------------------------------------------
+# Every run checks the role against the facts on the host BEFORE anything is changed: the record,
+# the systemd state of both services, the DataNode token and controller.env. The facts are always
+# printed, so a wrong decision is visible. A contradiction stops the run (--force-role overrides).
+unit_flag() { # unit_flag is-enabled|is-active UNIT -> yes / no
+  if command -v systemctl >/dev/null 2>&1 && systemctl "$1" --quiet "$2" 2>/dev/null; then echo yes; else echo no; fi
+}
+file_flag() { # file_flag PATH -> yes when the file exists and is not empty
+  if [ -s "$1" ]; then echo yes; else echo no; fi
+}
+
+verify_role() {
+  _vr_want="$1"
+  _vr_rec="$(recorded_role)"
+  _vr_ce="$(unit_flag is-enabled mirymesh-controller)"
+  _vr_ca="$(unit_flag is-active mirymesh-controller)"
+  _vr_de="$(unit_flag is-enabled mirymesh-datanode)"
+  _vr_da="$(unit_flag is-active mirymesh-datanode)"
+  _vr_tok="$(file_flag /var/lib/mirymesh/datanode.token)"
+  _vr_env="no"
+  if [ -e /etc/mirymesh/controller.env ]; then _vr_env="yes"; fi
+  VR_TOKEN_BEFORE="$_vr_tok"
+
+  log "Role check: this run installs the host as '$_vr_want'"
+  log "  recorded role ($ROLE_FILE): ${_vr_rec:-(none)}"
+  log "  mirymesh-controller: enabled=$_vr_ce active=$_vr_ca, controller.env: $_vr_env"
+  log "  mirymesh-datanode:   enabled=$_vr_de active=$_vr_da, datanode.token: $_vr_tok"
+  if [ "$(id -u)" != "0" ]; then
+    log "  WARNING: not running as root; /var/lib/mirymesh may be unreadable, so datanode.token can show 'no' wrongly"
+  fi
+
+  _vr_why=""
+  if [ -n "$_vr_rec" ]; then
+    # The record wins. Only a different role is a contradiction.
+    if [ "$_vr_rec" != "$_vr_want" ]; then _vr_why="the record says '$_vr_rec'"; fi
+  elif [ "$_vr_want" = "master" ]; then
+    if [ "$_vr_tok" = "yes" ]; then
+      _vr_why="datanode.token exists (this host is paired as a DataNode)"
+    elif [ "$_vr_de" = "yes" ] || [ "$_vr_da" = "yes" ]; then
+      _vr_why="mirymesh-datanode is enabled or running here"
+    fi
+  else
+    # A client run is allowed on a damaged DataNode host (that is the recovery path). It is only
+    # refused when the host looks like a pure Master: controller on, no DataNode token or service.
+    if [ "$_vr_tok" = "no" ] && [ "$_vr_de" = "no" ] && [ "$_vr_da" = "no" ] \
+       && { [ "$_vr_ce" = "yes" ] || [ "$_vr_ca" = "yes" ]; }; then
+      _vr_why="mirymesh-controller is enabled or running and there is no DataNode token or service"
+    fi
+  fi
+
+  if [ -n "$_vr_why" ]; then
+    if [ -n "$FORCE_ROLE" ]; then
+      log "WARNING: role check failed ($_vr_why), continuing because of --force-role"
+    else
+      die "role check failed: $_vr_why, but this run would install the host as '$_vr_want'. Nothing was changed. If '$_vr_want' is right: echo $_vr_want | sudo tee $ROLE_FILE (or pass --force-role)."
+    fi
+  fi
+  if [ "$_vr_want" = "client" ] && { [ "$_vr_ce" = "yes" ] || [ "$_vr_ca" = "yes" ]; }; then
+    log "WARNING: mirymesh-controller is enabled or running on a DataNode host. It is left alone; stop it with: sudo systemctl disable --now mirymesh-controller"
+  fi
+  log "Role check: OK ('$_vr_want' agrees with this host)"
+}
+
+# After the run: the record must say what was installed, a paired DataNode must still have its token.
+verify_after_install() {
+  _va_bad=""
+  if [ "$(recorded_role)" != "$ROLE" ]; then _va_bad="$ROLE_FILE does not say '$ROLE'"; fi
+  if [ "$VR_TOKEN_BEFORE" = "yes" ] && [ ! -s /var/lib/mirymesh/datanode.token ]; then
+    _va_bad="datanode.token disappeared during this run (the node is no longer paired)"
+  fi
+  if [ -n "$_va_bad" ]; then die "post-install role check failed: $_va_bad"; fi
+  if [ "$ROLE" = "client" ] && [ "$(unit_flag is-active mirymesh-controller)" = "yes" ]; then
+    log "WARNING: mirymesh-controller is running on this DataNode host. Stop it with: sudo systemctl disable --now mirymesh-controller"
+  fi
+  log "Role check after install: OK ($ROLE; record written, DataNode token kept)"
+}
+
+verify_role "$ROLE"
+if [ -n "$CHECK_ROLE" ]; then
+  log "Role detection (what --update would pick): $(detect_installed_role)"
+  log "--check-role: nothing was changed."
+  exit 0
 fi
 
 # For master, ask gateway mode (Master holds no S3 objects)
@@ -451,17 +597,24 @@ install_from_source() {
   export CGO_CFLAGS
   _ldf=""
   [ -z "$VERSION" ] || _ldf="-X github.com/sylphre/MiryMesh/internal/version.Version=$VERSION"
-  (cd "$SRC" && go build -trimpath -ldflags="$_ldf" -o /tmp/mirymesh-controller ./cmd/controller)
+  # A DataNode host gets no controller: its mere presence made later runs detect the host as a Master.
+  if [ "$ROLE" != "client" ]; then
+    (cd "$SRC" && go build -trimpath -ldflags="$_ldf" -o /tmp/mirymesh-controller ./cmd/controller)
+  fi
   (cd "$SRC" && go build -trimpath -ldflags="$_ldf" -o /tmp/mirymesh-datanode   ./cmd/datanode)
   (cd "$SRC" && go build -trimpath -ldflags="$_ldf" -o /tmp/mirymesh            ./cmd/mirymesh)
-  install -m 0755 /tmp/mirymesh-controller /usr/local/bin/mirymesh-controller
+  if [ "$ROLE" != "client" ]; then
+    install -m 0755 /tmp/mirymesh-controller /usr/local/bin/mirymesh-controller
+  fi
   install -m 0755 /tmp/mirymesh-datanode   /usr/local/bin/mirymesh-datanode
   install -m 0755 /tmp/mirymesh            /usr/local/bin/mirymesh
   # The console is embedded in the controller binary. Drop the copy an older install left behind.
   rm -rf /usr/share/mirymesh/static
   rmdir /usr/share/mirymesh 2>/dev/null || true
   if [ -f "$SRC/packaging/systemd/mirymesh-controller.service" ]; then
-    sed 's|/usr/bin/mirymesh-controller|/usr/local/bin/mirymesh-controller|g' "$SRC/packaging/systemd/mirymesh-controller.service" > /etc/systemd/system/mirymesh-controller.service
+    if [ "$ROLE" != "client" ]; then
+      sed 's|/usr/bin/mirymesh-controller|/usr/local/bin/mirymesh-controller|g' "$SRC/packaging/systemd/mirymesh-controller.service" > /etc/systemd/system/mirymesh-controller.service
+    fi
     sed 's|/usr/bin/mirymesh-datanode|/usr/local/bin/mirymesh-datanode|g' "$SRC/packaging/systemd/mirymesh-datanode.service" > /etc/systemd/system/mirymesh-datanode.service
   fi
   log "Installed to /usr/local/bin"
@@ -780,6 +933,8 @@ chown mirymesh:mirymesh /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
 chmod 0750 /etc/mirymesh /var/lib/mirymesh /var/log/mirymesh 2>/dev/null || true
 # Remember the channel so that a later --update stays on it (a source build carries no version suffix).
 printf '%s\n' "$CHANNEL" > "$CHANNEL_FILE" 2>/dev/null || true
+# Remember the role: later runs trust this over guessing from installed files.
+printf '%s\n' "$ROLE" > "$ROLE_FILE" 2>/dev/null || true
 # Master: pass the DB the installer just created (and the master key) to the controller.
 write_controller_env
 if [ ! -f /etc/mirymesh/config.yaml ] && [ -f "$SRC/packaging/config/config.yaml.example" ]; then
@@ -951,4 +1106,5 @@ else
   fi
 fi
 
+verify_after_install
 if [ -n "$UPDATE" ]; then log "Update finished ($ROLE)."; else log "Done ($ROLE)."; fi

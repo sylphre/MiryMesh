@@ -136,7 +136,18 @@ func (a *Agent) acceptNodeToken(tok string) {
 	if file != "" {
 		err := os.MkdirAll(filepath.Dir(file), 0o700)
 		if err == nil {
-			err = os.WriteFile(file, []byte(tok+"\n"), 0o600)
+			// Keep the token being replaced, so a bad re-pairing can be undone by hand.
+			if old, rerr := os.ReadFile(filepath.Clean(file)); rerr == nil {
+				if o := strings.TrimSpace(string(old)); o != "" && o != tok {
+					_ = os.WriteFile(file+".prev", old, 0o600)
+				}
+			}
+			// Write then rename, so a crash never leaves a half-written token behind.
+			tmp := file + ".tmp"
+			err = os.WriteFile(tmp, []byte(tok+"\n"), 0o600)
+			if err == nil {
+				err = os.Rename(tmp, file)
+			}
 		}
 		if err != nil {
 			slog.Warn("datanode: could not persist node token", "path", file, "err", err)
@@ -144,30 +155,42 @@ func (a *Agent) acceptNodeToken(tok string) {
 	}
 }
 
-// dropStoredToken forgets a node token the controller rejected and falls back to the
-// configured credential. It reports whether there was a node token to drop.
-func (a *Agent) dropStoredToken() bool {
-	a.mu.Lock()
-	if !a.haveNodeToken {
-		a.mu.Unlock()
-		return false
-	}
-	a.haveNodeToken = false
-	a.paired = false
-	a.token = a.cfgToken()
-	file, hook := a.tokenFile, a.onNodeToken
-	a.mu.Unlock()
-	if file != "" {
-		_ = os.Remove(file)
-	}
-	if hook != nil {
-		hook("")
-	}
-	return true
+// hasNodeToken reports whether the agent holds a controller-issued node token.
+//
+// A node token is NEVER discarded because the controller rejected it. A rejection can come
+// from a Master restored with another admin token or from a misconfiguration, and forgetting
+// the token would turn that into a permanent unpairing (the one-time pair token is already
+// burned). The token is only replaced by a newer one after a successful registration
+// (acceptNodeToken), and the replaced one is kept as <file>.prev.
+func (a *Agent) hasNodeToken() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.haveNodeToken
 }
 
-// Register performs a single registration RPC.
+// errRegisterRejected means the controller answered 403 to a registration.
+var errRegisterRejected = errors.New("controller rejected the credential")
+
+// Register performs a registration RPC. When the controller rejects the stored node token,
+// that token is kept (see hasNodeToken); the configured credential (for example a fresh
+// pair token) is tried once as a way to re-pair, and the stored token stays in use otherwise.
 func (a *Agent) Register() error {
+	stored := a.currentToken()
+	err := a.registerWith(stored)
+	if err == nil || !errors.Is(err, errRegisterRejected) || !a.hasNodeToken() {
+		return err
+	}
+	if fresh := a.cfgToken(); fresh != "" && fresh != stored {
+		if ferr := a.registerWith(fresh); ferr == nil {
+			return nil
+		}
+	}
+	slog.Error("datanode: controller rejected the stored node token; keeping it and retrying (re-pair with a new pair token if the Master was reinstalled)")
+	return fmt.Errorf("%w (stored node token kept)", err)
+}
+
+// registerWith sends one registration request carrying token.
+func (a *Agent) registerWith(token string) error {
 	base := a.controllerURL()
 	if base == "" {
 		return fmt.Errorf("controller_url is not configured")
@@ -176,7 +199,7 @@ func (a *Agent) Register() error {
 	body, _ := json.Marshal(map[string]string{
 		"node_id": a.nodeID,
 		"addr":    addr,
-		"token":   a.currentToken(),
+		"token":   token,
 		"version": version.Version,
 	})
 	resp, err := a.client.Post(base+"/internal/register", "application/json", bytes.NewReader(body))
@@ -184,8 +207,8 @@ func (a *Agent) Register() error {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusForbidden && a.dropStoredToken() {
-		return fmt.Errorf("register failed: %s (stored node token rejected; falling back to configured token)", resp.Status)
+	if resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("register failed: %s: %w", resp.Status, errRegisterRejected)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("register failed: %s", resp.Status)
@@ -264,6 +287,9 @@ func (a *Agent) ReportDisks() error {
 	return nil
 }
 
+// errHeartbeatRejected means the controller answered 403 to a heartbeat.
+var errHeartbeatRejected = errors.New("controller rejected the heartbeat credential")
+
 // Heartbeat sends a single heartbeat.
 func (a *Agent) Heartbeat() error {
 	base := a.controllerURL()
@@ -281,6 +307,9 @@ func (a *Agent) Heartbeat() error {
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
 		return errUnknownNode
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("heartbeat failed: %s: %w", resp.Status, errHeartbeatRejected)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("heartbeat failed: %s", resp.Status)
@@ -327,7 +356,9 @@ func (a *Agent) RegisterAndHeartbeatLoop(ticker *time.Ticker) error {
 			continue
 		}
 		slog.Warn("datanode: heartbeat failed", "err", err)
-		if errors.Is(err, errUnknownNode) {
+		// 404: the Master forgot the node. 403: the Master rejects our token. In both cases try to
+		// register again (Register keeps the stored token and may re-pair with a fresh pair token).
+		if errors.Is(err, errUnknownNode) || errors.Is(err, errHeartbeatRejected) {
 			a.registerAndReport()
 		}
 	}

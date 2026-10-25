@@ -134,6 +134,22 @@ Master の Web UI で **Nodes → 「Node を追加」** を開くと、次の�
 - 配布版に戻したいときは、`--update --channel release`（rc を含めるなら `--update --prerelease`）を付けて実行します。
 - Dev ビルドのノードでは、Nodes 画面の「更新」ボタンを押さないでください。
 
+**役割（Master / DataNode）の取り違え防止:**
+
+- `install.sh` は、毎回の実行で変更を加える前に役割を確認します。確認に使った事実（`/etc/mirymesh/role` の記録、`mirymesh-controller` と `mirymesh-datanode` の enabled / active、`controller.env`、`datanode.token`）は必ず表示されます。
+- 矛盾があるとき（例: DataNode のトークンやサービスがあるホストに `--master`）は、何も変更せずに止まります。本当にその役割で正しいときだけ `--force-role` を付けます。
+- 実行後は、`/etc/mirymesh/role` が書かれたことと、ペアリング済みの DataNode に `datanode.token` が残っていることも確認します。
+- 更新の前に、変更なしで確認だけしたいときは `--check-role` を使います。`--master` / `--client` を併せて付けると、その役割で実行した場合の結果を確かめられます。
+
+      sudo bash install.sh --check-role
+      sudo bash install.sh --check-role --client
+
+- 役割の記録がない古いホストでは、最初に一度だけ手で書いておくと確実です（Master は `master`、DataNode は `client`）。
+
+      echo client | sudo tee /etc/mirymesh/role
+
+- DataNode は、Master から拒否されても `datanode.token` を消しません。Master を入れ直したときは、新しい pair token で再ペアリングします（置き換えられた古いトークンは `datanode.token.prev` に残ります）。Master は応答のないノードを offline にするだけで、ノードもディスクの情報も削除しません。コンテナが故障しても、復旧して heartbeat が届けば online に戻ります。
+
 #### ブランチとリリースの流れ
 
 `dev` → `prerelease` → `release` の順に PR を作って merge します。release ワークフローは、merge 先のブランチでリリースの種類を決めます。
