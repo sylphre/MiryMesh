@@ -14,9 +14,11 @@
 #
 # /mnt/disk1 /mnt/disk2 は自分のマウント先に書き換える。
 
-[Service]
-ReadWritePaths=/mnt/disk1 /mnt/disk2
-
 # /etc/fstab にあるマウントが済むまで起動を待つ。
 # ディスクが外れたまま起動して、ルートファイルシステムに書き込む事故を防ぐ。
+# RequiresMountsFor は [Unit] 専用のキー。[Service] に書くと無視される。
+[Unit]
 RequiresMountsFor=/mnt/disk1 /mnt/disk2
+
+[Service]
+ReadWritePaths=/mnt/disk1 /mnt/disk2

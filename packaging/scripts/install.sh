@@ -1007,9 +1007,12 @@ if [ "$ROLE" = "client" ] && [ -n "${DATANODE_PATHS:-}" ]; then
   mkdir -p /etc/systemd/system/mirymesh-datanode.service.d
   cat > /etc/systemd/system/mirymesh-datanode.service.d/20-data-paths.conf <<CONF
 # Written by install.sh. Run it again with --path to change the list.
+# RequiresMountsFor is a [Unit] key; in [Service] systemd ignores it.
+[Unit]
+RequiresMountsFor=$_rw
+
 [Service]
 ReadWritePaths=$_rw
-RequiresMountsFor=$_rw
 CONF
   log "Data paths made writable for the service:$_rw"
 fi
