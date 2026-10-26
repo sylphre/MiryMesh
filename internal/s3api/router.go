@@ -227,6 +227,10 @@ func splitPath(p string) (bucket, key string, isBucketOp bool) {
 	}
 	bucket = trimmed[:idx]
 	key = trimmed[idx+1:]
-	// Leading slash removed; key may be empty if path ends with "/".
+	// "/bucket/" addresses the bucket itself, exactly like "/bucket". Path-style
+	// clients such as minio-go send the trailing slash for bucket operations.
+	if key == "" {
+		return bucket, "", true
+	}
 	return bucket, key, false
 }
