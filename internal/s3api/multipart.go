@@ -217,9 +217,9 @@ func (s *Storage) AbortMultipartUpload(uploadID string) error {
 
 // CompleteMultipartUpload assembles parts into the final object.
 func (s *Storage) CompleteMultipartUpload(uploadID string, parts []CompletePart) (ObjectMeta, error) {
-	st, err := s.beginComplete(uploadID)
-	if err != nil {
-		return ObjectMeta{}, err
+	st, berr := s.beginComplete(uploadID)
+	if berr != nil {
+		return ObjectMeta{}, berr
 	}
 	defer s.endComplete(uploadID)
 	if len(parts) == 0 {

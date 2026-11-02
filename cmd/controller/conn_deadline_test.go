@@ -45,7 +45,7 @@ func TestProgressDeadlinesAllowSlowBodyAndSlowHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read response: %v", err)
@@ -67,7 +67,7 @@ func TestProgressDeadlinesDropStalledClient(t *testing.T) {
 	defer srv.Close()
 
 	pr, pw := io.Pipe()
-	defer pw.Close()
+	defer func() { _ = pw.Close() }()
 	go func() {
 		if _, err := pw.Write([]byte("start")); err != nil {
 			return

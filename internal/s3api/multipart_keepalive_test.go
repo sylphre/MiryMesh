@@ -97,7 +97,7 @@ func newGatedRouter(t *testing.T, gate <-chan struct{}, fail error, keepAlive ti
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateBucket("bkt"); err != nil {
+	if err = st.CreateBucket("bkt"); err != nil {
 		t.Fatal(err)
 	}
 	rt := NewRouter(&gatedCompleteStore{Storage: st, gate: gate, fail: fail}, "us-east-1")
@@ -188,7 +188,7 @@ func TestCompleteMultipartRejectsConcurrentComplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateBucket("bkt"); err != nil {
+	if err = st.CreateBucket("bkt"); err != nil {
 		t.Fatal(err)
 	}
 	up, err := st.CreateMultipartUpload("bkt", "k", "", nil)
@@ -201,7 +201,7 @@ func TestCompleteMultipartRejectsConcurrentComplete(t *testing.T) {
 	}
 	parts := []CompletePart{{PartNumber: 1, ETag: rec.ETag}}
 
-	if _, err := st.beginComplete(up.UploadID); err != nil {
+	if _, err = st.beginComplete(up.UploadID); err != nil {
 		t.Fatal(err)
 	}
 	for name, call := range map[string]func() error{
@@ -231,7 +231,7 @@ func TestGetUploadPartsIsolatedFromUploadPart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateBucket("bkt"); err != nil {
+	if err = st.CreateBucket("bkt"); err != nil {
 		t.Fatal(err)
 	}
 	up, err := st.CreateMultipartUpload("bkt", "k", "", nil)
