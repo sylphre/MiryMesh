@@ -179,8 +179,7 @@ func (s *Storage) ListMultipartUploads(bucket string) ([]*MultipartUploadState, 
 	var out []*MultipartUploadState
 	for _, st := range s.uploads {
 		if st.Bucket == bucket {
-			cpy := *st
-			out = append(out, &cpy)
+			out = append(out, copyUpload(st))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Initiated.Before(out[j].Initiated) })
@@ -192,8 +191,7 @@ func (s *Storage) GetUpload(uploadID string) *MultipartUploadState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if st, ok := s.uploads[uploadID]; ok {
-		cpy := *st
-		return &cpy
+		return copyUpload(st)
 	}
 	return nil
 }
@@ -206,6 +204,10 @@ func (s *Storage) AbortMultipartUpload(uploadID string) error {
 		s.mu.Unlock()
 		return APIError{Code: "NoSuchUpload", Message: "The specified upload does not exist", Status: 404}
 	}
+	if s.completing[uploadID] {
+		s.mu.Unlock()
+		return errCompleteInProgress
+	}
 	delete(s.uploads, uploadID)
 	s.mu.Unlock()
 	_ = s.persistUploads()
@@ -215,12 +217,11 @@ func (s *Storage) AbortMultipartUpload(uploadID string) error {
 
 // CompleteMultipartUpload assembles parts into the final object.
 func (s *Storage) CompleteMultipartUpload(uploadID string, parts []CompletePart) (ObjectMeta, error) {
-	s.mu.RLock()
-	st, ok := s.uploads[uploadID]
-	s.mu.RUnlock()
-	if !ok {
-		return ObjectMeta{}, APIError{Code: "NoSuchUpload", Message: "The specified upload does not exist", Status: 404}
+	st, err := s.beginComplete(uploadID)
+	if err != nil {
+		return ObjectMeta{}, err
 	}
+	defer s.endComplete(uploadID)
 	if len(parts) == 0 {
 		return ObjectMeta{}, errInvalidRequest
 	}
@@ -257,10 +258,17 @@ func (s *Storage) CompleteMultipartUpload(uploadID string, parts []CompletePart)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return ObjectMeta{}, err
 	}
-	tmp := dest + ".tmp-" + finalETag
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	// A unique temporary name, so this file is never shared with another write
+	// of the same key. ".tmp-" keeps it out of listings.
+	out, err := os.CreateTemp(filepath.Dir(dest), filepath.Base(dest)+".tmp-*")
 	if err != nil {
 		return ObjectMeta{}, err
+	}
+	tmp := out.Name()
+	if cerr := out.Chmod(0o640); cerr != nil {
+		_ = out.Close()
+		_ = os.Remove(tmp)
+		return ObjectMeta{}, cerr
 	}
 	var total int64
 	for _, path := range partPaths {
@@ -298,6 +306,49 @@ func (s *Storage) CompleteMultipartUpload(uploadID string, parts []CompletePart)
 	_ = s.persistUploads()
 	_ = os.RemoveAll(s.MultipartDir(uploadID))
 	return meta, nil
+}
+
+// errCompleteInProgress answers Complete or Abort while another Complete of
+// the same upload is assembling the object. Clients retry Complete after a
+// lost response; the retry must not assemble the object a second time while
+// the first copy is still running.
+var errCompleteInProgress = APIError{Code: "OperationAborted", Message: "A conflicting conditional operation is currently in progress against this resource. Please try again.", Status: 409}
+
+// copyUpload returns a copy of st with its own Parts map, so callers can read
+// the parts while UploadPart keeps updating the original. Call with s.mu held.
+func copyUpload(st *MultipartUploadState) *MultipartUploadState {
+	cpy := *st
+	cpy.Parts = make(map[int]PartRecord, len(st.Parts))
+	for n, p := range st.Parts {
+		cpy.Parts[n] = p
+	}
+	return &cpy
+}
+
+// beginComplete marks the upload as completing and returns a snapshot of it.
+// Every successful call must be followed by endComplete.
+func (s *Storage) beginComplete(uploadID string) (*MultipartUploadState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.uploads[uploadID]
+	if !ok {
+		return nil, APIError{Code: "NoSuchUpload", Message: "The specified upload does not exist", Status: 404}
+	}
+	if s.completing[uploadID] {
+		return nil, errCompleteInProgress
+	}
+	if s.completing == nil {
+		s.completing = make(map[string]bool)
+	}
+	s.completing[uploadID] = true
+	return copyUpload(st), nil
+}
+
+// endComplete clears the mark set by beginComplete.
+func (s *Storage) endComplete(uploadID string) {
+	s.mu.Lock()
+	delete(s.completing, uploadID)
+	s.mu.Unlock()
 }
 
 // CompletePart is a part reference in CompleteMultipartUpload.

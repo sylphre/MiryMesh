@@ -239,7 +239,14 @@ func (rt *Router) handleCompleteMultipart(w http.ResponseWriter, r *http.Request
 		writeFailure(w, r, planErr)
 		return
 	}
-	meta, err2 := rt.store.CompleteMultipartUpload(uploadID, parts)
+	// Assembling a large object can take minutes; see runWithKeepAlive.
+	w, meta, err2 := runWithKeepAlive(w, rt.completeKeepAliveInterval(),
+		func(h http.Header) {
+			if plan.sse != nil {
+				sseEcho(h, plan.sse.KeyMD5)
+			}
+		},
+		func() (ObjectMeta, error) { return rt.store.CompleteMultipartUpload(uploadID, parts) })
 	if err2 != nil {
 		writeFailure(w, r, err2)
 		return

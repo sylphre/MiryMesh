@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sylphre/MiryMesh/internal/datanode"
 	"github.com/sylphre/MiryMesh/internal/placement"
@@ -25,6 +26,10 @@ type Router struct {
 	region   string
 	regionMu sync.RWMutex
 	placing  PlacementResolver
+	// completeKeepAlive is how long CompleteMultipartUpload may stay silent
+	// before it answers 200 and sends whitespace. Zero means
+	// defaultCompleteKeepAlive; tests set it lower.
+	completeKeepAlive time.Duration
 }
 
 // PlacementResolver is the placement decision hook used by S3 handlers.

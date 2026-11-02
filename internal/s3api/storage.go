@@ -81,6 +81,8 @@ type Storage struct {
 	meta map[string]map[string]ObjectMeta
 	// multipart in-progress uploads: uploadID -> upload (persisted to disk)
 	uploads map[string]*MultipartUploadState
+	// completing holds the upload IDs whose CompleteMultipartUpload is running.
+	completing map[string]bool
 	// bucket creation times recorded by this process
 	created map[string]time.Time
 	// P2 subresource documents (acl/tagging/cors/lifecycle) when no DB is attached

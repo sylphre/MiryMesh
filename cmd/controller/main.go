@@ -330,12 +330,13 @@ func main() {
 		}
 	}()
 
+	// No ReadTimeout/WriteTimeout: they cap the whole request and cut off large
+	// uploads and long CompleteMultipartUpload calls. See conn_deadline.go.
 	srv := &http.Server{
-		Addr:         cfg.Server.Listen,
-		Handler:      s3Engine,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Addr:              cfg.Server.Listen,
+		Handler:           withProgressDeadlines(s3Engine, s3ProgressTimeout),
+		ReadHeaderTimeout: s3ReadHeaderTimeout,
+		IdleTimeout:       s3IdleTimeout,
 	}
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, "controller: listen: %v\n", err)
